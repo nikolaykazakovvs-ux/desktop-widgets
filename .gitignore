@@ -1,0 +1,26 @@
+# Local settings and all runtime/account information
+config.json
+state.json
+state.json.*
+widget.log*
+network-log/
+*.log
+.env*
+credentials/
+auth.json
+server.token
+# Build outputs; source distributions only
+*.exe
+*.dll
+*.pdb
+*.msi
+*.zip
+bin/
+obj/
+dist/
+artifacts/
+_checks/
+.vs/
+.idea/
+Thumbs.db
+Desktop.ini

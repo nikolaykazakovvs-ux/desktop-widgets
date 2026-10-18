@@ -1,0 +1,25 @@
+{
+  "allowLocalTokens": false,
+  "order": [
+    "claude",
+    "kimi",
+    "antigravity",
+    "codex"
+  ],
+  "services": {
+    "kimi": {
+      "enabled": false
+    },
+    "codex": {
+      "enabled": false
+    },
+    "claude": {
+      "enabled": false
+    },
+    "antigravity": {
+      "enabled": false
+    }
+  },
+  "refreshSeconds": 300,
+  "hotkey": "Ctrl+Alt+L"
+}

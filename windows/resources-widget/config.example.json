@@ -1,0 +1,14 @@
+{
+  "topProcesses": 5,
+  "internetMbps": 0,
+  "pingWarnMs": 150,
+  "pingIntervalSec": 2,
+  "historySeconds": 60,
+  "pingHost": "",
+  "disks": [],
+  "intervalMs": 1000,
+  "networkUnits": "bits",
+  "lhmUrl": "",
+  "gpuSource": "auto",
+  "hotkey": "Ctrl+Alt+R"
+}
