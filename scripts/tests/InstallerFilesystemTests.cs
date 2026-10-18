@@ -1,6 +1,9 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Reflection;
+using System.Dynamic;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 using ResourcesWidgetSetup;
@@ -103,7 +106,47 @@ static class InstallerFilesystemTests
         Reject(() => InstallDirectory.RemoveApplicationFiles(linkedLogInstall), "junction child before removal");
         Check(File.ReadAllText(Path.Combine(outside, "sentinel.txt")) == "KEEP TARGET", "Junction target changed");
         Check(File.ReadAllText(sentinel) == "KEEP", "Shared sentinel changed after all tests");
+        string managerDir = Path.Combine(scratch, "tombstone-contract");
+        Directory.CreateDirectory(managerDir);
+        string manager = Path.Combine(managerDir, "SensorSetup.exe"), pending = LocalSensorInstall.NewRemovalTombstone(managerDir);
+        File.WriteAllText(manager, "old");
+        File.Move(manager, pending);
+        File.WriteAllText(manager, "new replacement");
+        Check(pending != manager && pending != LocalSensorInstall.NewRemovalTombstone(managerDir), "Deferred-delete filename reused");
+        File.Delete(pending); // simulate reboot deletion of exactly the queued unique path
+        Check(File.ReadAllText(manager) == "new replacement", "Remove/reinstall before reboot lost replacement manager");
+        Program.HoldSourceImage();
+        bool blockedWrite = false, blockedRename = false;
+        try { using (var writable = new FileStream(Program.SelfPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) { } } catch (IOException) { blockedWrite = true; }
+        try { File.Move(Program.SelfPath, Program.SelfPath + ".renamed"); } catch (IOException) { blockedRename = true; }
+        Check(blockedWrite && blockedRename, "Source image lock failed to block replacement/write on Windows");
+        dynamic scheduler = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service"));
+        scheduler.Connect();
+        object folder = scheduler.GetFolder("\\");
+        var missingTask = typeof(LocalSensorInstall).GetMethod("ExistingTask", BindingFlags.NonPublic | BindingFlags.Static);
+        Check(missingTask.Invoke(null, new[] { folder, (object)("ResourcesWidget-missing-regression-" + Guid.NewGuid().ToString("N")) }) == null, "Real Task Scheduler missing-task HRESULT was not handled");
+        string ownSid = WindowsIdentity.GetCurrent().User.Value;
+        Check(LocalSensorInstall.CanonicalSid(WindowsIdentity.GetCurrent().Name) == ownSid, "Windows account name did not normalize to intended SID");
+        Check(LocalSensorInstall.CanonicalSid(ownSid) != ResourcesWidgetSensor.SensorSecurity.SystemSid.Value, "Foreign principal accepted as SYSTEM");
+        dynamic ownTask = missingTask.Invoke(null, new[] { folder, (object)ResourcesWidgetSensor.SensorSecurity.TaskName(ownSid) });
+        if (ownTask != null)
+        {
+            var assertTask = typeof(LocalSensorInstall).GetMethod("AssertTask", BindingFlags.NonPublic | BindingFlags.Static);
+            assertTask.Invoke(null, new object[] { ownTask, ownSid }); // actual task read-only; never start/stop/update
+            dynamic definition = ownTask.Definition;
+            dynamic fake = new ExpandoObject(), fakeDefinition = new ExpandoObject(), principal = new ExpandoObject();
+            principal.UserId = ownSid; principal.LogonType = 5; principal.RunLevel = 1;
+            fakeDefinition.Principal = principal; fakeDefinition.Actions = definition.Actions; fakeDefinition.Triggers = definition.Triggers;
+            fake.Definition = fakeDefinition;
+            bool rejected = false;
+            try { assertTask.Invoke(null, new object[] { fake, ownSid }); }
+            catch (TargetInvocationException ex) { if (ex.InnerException is IOException) rejected = true; else throw; }
+            Check(rejected, "Foreign task principal passed ownership validation");
+            Console.WriteLine("PASS: real existing task localized principal/account names normalized to exact expected SIDs; foreign principal rejected; task was only read.");
+        }
         Console.WriteLine("PASS: dedicated-directory/ownership/root/shared/reparse guards; real file install/upgrade; removal preserves config/state/logs/unknown files; reinstall preserves data. No profile writes or process control.");
+        Console.WriteLine("PASS: Windows source-image write/rename refusal, protected copy from held stream; unique tombstone removal/reinstall contract preserves replacement.");
+        Console.WriteLine("PASS: actual local Task Scheduler COM query for a missing task returns null; no task was registered or changed.");
         return 0;
     }
 }

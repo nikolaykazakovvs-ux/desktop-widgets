@@ -1,22 +1,24 @@
 # Desktop Widgets
 
-[Русский](README.ru.md) · [Project page](https://nikolaykazakovvs-ux.github.io/desktop-widgets/) · [Download v0.1.0](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.0)
+[Русский](README.ru.md) · [Project page](https://nikolaykazakovvs-ux.github.io/desktop-widgets/) · [Download v0.1.1](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.1)
 
 Two independent Windows widgets. **System Resources** monitors your computer and keeps a detailed network journal. **AI Limits** shows subscription usage windows and reset times. Use either on its own. Native C# and Windows Presentation Foundation (WPF); the application interface is currently Russian.
 
 ## Download and run
 
-First public alpha collection: **v0.1.0**. Requirements: **Windows 10/11 x64 and .NET Framework 4.8**. macOS and Linux are planned separately; neither has an implementation or download yet.
+Public alpha collection: **v0.1.1**. Requirements: **Windows 10/11 x64 and .NET Framework 4.8**. macOS and Linux are planned separately; neither has an implementation or download yet.
 
 | Application | Download | Start |
 | --- | --- | --- |
-| System Resources 1.1.0 | [Windows installer](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.0/ResourcesWidgetSetup-1.1.0-x64.exe) | Open the installer; it shows the card after installation |
-| System Resources 1.1.0 | [Portable ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.0/ResourcesWidget-1.1.0-win-x64.zip) | Extract to a writable folder and open ResourcesWidget.exe |
-| AI Limits 1.0.0 | [ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.0/LimitsWidget-1.0.0-win.zip) | Extract, open LimitsWidget.exe, then enable the sources you need |
+| System Resources 1.1.1 | [Windows installer](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.1/ResourcesWidgetSetup-1.1.1-x64.exe) | Open the installer; it shows the card after installation |
+| System Resources 1.1.1 | [Portable ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.1/ResourcesWidget-1.1.1-win-x64.zip) | Extract to a writable folder and open ResourcesWidget.exe |
+| AI Limits 1.0.0 | [ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.1/LimitsWidget-1.0.0-win.zip) | Extract, open LimitsWidget.exe, then enable the sources you need |
 
-[Release notes, assets and SHA-256 checksums](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.0). Applications and installer are unsigned; Windows may warn about an unknown publisher. Follow your organisation's policies on managed computers.
+[Release notes, assets and SHA-256 checksums](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.1). Applications and installer are unsigned; Windows may warn about an unknown publisher. Follow your organisation's policies on managed computers.
 
-The resources installer installs for the current user into a new/empty dedicated folder or a verified existing installation, adds shortcuts and an uninstall entry, and preserves configuration and window state on upgrade. **Startup is opt-in.** Uninstall removes known application binaries while preserving settings, network history and unrelated files. This first public preview does not bundle, install, start or configure sensor applications or drivers; use independently configured external sensors.
+The resources installer installs for the current user into a new/empty dedicated folder or a verified existing installation, adds shortcuts and an uninstall entry, and preserves configuration and window state on upgrade. **Startup and the local temperature sensor are opt-in.** Uninstall removes known application binaries while preserving settings, network history and unrelated files.
+
+The optional checkbox “Локальный датчик температуры процессора (с драйвером PawnIO)” installs a separate local helper with normal Windows administrator approval. It can also be added later through “Установить локальный датчик температуры…” in the tray menu. The main widget runs as a regular user. The helper reads CPU sensors directly through the LibreHardwareMonitor library and exports a protected local file; it opens no network listener and starts no web server. Existing external LibreHardwareMonitor installations are left untouched. Widget uninstall offers helper removal separately; the shared PawnIO driver is retained. [Design and verification boundaries](docs/sensor-security.md).
 
 Click the tray icon to show or hide a card. Default hotkeys: **Ctrl+Alt+R** for resources, **Ctrl+Alt+L** for limits. Tray menus offer themes, scale, opacity, pinning, startup and exit. First launch does not automatically enable Windows startup or change tray icon visibility. Data is stored beside the application, so ZIP distributions need a writable folder. Another copy may show an already-running instance of the same widget.
 
@@ -54,9 +56,13 @@ Actual application interface; controlled, anonymised demo data. Local network-lo
 
 External ping defaults to **1.1.1.1**, the router is discovered automatically, and the interval is two seconds. Empty pingHost disables probes. Internet Control Message Protocol (ICMP) replies can be filtered or rate-limited. Router/external comparisons help investigation but do not conclusively identify the provider, router or cable as the cause.
 
-GPU readings use NVIDIA's driver interface and Windows Display Driver Model (WDDM) statistics. CPU temperature can come from compatible HWiNFO, AIDA64, Core Temp or LibreHardwareMonitor. The optional client reads an already configured local LibreHardwareMonitor at 127.0.0.1:8085; it never starts or configures a server. Without an external source, temperature remains unavailable. Empty lhmUrl disables that polling. Sensor availability depends on hardware, driver and helper permissions.
+GPU readings use NVIDIA's driver interface and Windows Display Driver Model (WDDM) statistics. CPU temperature can come from the opt-in local helper. Its file is accepted only with valid data no older than five seconds; otherwise temperature remains unavailable or another available source is used.
+
+Existing HWiNFO, AIDA64, Core Temp and LibreHardwareMonitor integrations remain available. A separate HTTP client can read an independently configured external LibreHardwareMonitor at 127.0.0.1:8085; it never starts or configures that server. The bundled local helper does not use HTTP. Empty lhmUrl disables only external LibreHardwareMonitor polling. Sensor availability depends on hardware and driver support.
 
 The WDDM path has been checked on an NVIDIA RTX 3070; AMD and Intel have not been separately tested on real hardware. There is no verified older-PC compatibility or overhead matrix. Assess the widget and optional helper on the intended computer. [Comparison with other tools](docs/comparison.md).
+
+On 18 October 2026, the optional helper was installed on a real Windows host using ordinary administrator consent and an already installed shared PawnIO driver. A normal user read a real CPU temperature from the native local source; writes to the helper, library and snapshot were denied. The helper had no TCP/UDP endpoints. The native source expired after stopping it; restart, upgrade and removal passed while external LibreHardwareMonitor and the shared driver remained intact. A fresh driver installation and a clean-machine hardware matrix were not tested.
 
 ## AI Limits
 
@@ -79,7 +85,7 @@ allowLocalTokens controls only Kimi's direct fallback, not all authentication ac
 
 ## Data and privacy
 
-Settings, snapshots and journals stay beside the applications. Resources probes its configured ping host and may poll a local sensor helper; limits queries explicitly enabled sources. Exports can include device/process/adapter names, paths and activity history. Inspect and redact before sharing. Personal configuration, account data and logs are excluded from the repository and public archives.
+Settings, snapshots and journals stay beside the applications. Resources probes its configured ping host, reads the protected local sensor file and can query independently configured external sensors; limits queries explicitly enabled sources. Exports can include device/process/adapter names, paths and activity history. Inspect and redact before sharing. Personal configuration, account data and logs are excluded from the repository and public archives.
 
 The project page is static HTML, without analytics, account queries or external fonts. It uses actual WPF exports: real system readings for resources and controlled demo data for network history and limits.
 
@@ -95,8 +101,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\limits-widget\buil
 powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\resources-widget\installer\build-setup.ps1
 ```
 
-Application build scripts do not stop a running widget or overwrite existing config.json. The widget-only installer builds from these sources without downloads or third-party binary payloads. Do not query personal accounts during ordinary automated checks. See [contribution guidance](CONTRIBUTING.md).
+Application build scripts do not stop a running widget or overwrite existing config.json. Building the installer with its helper requires pinned LibreHardwareMonitor dependencies and the official signed PawnIO installer; preserve their checksums and redistribution notices. Do not query personal accounts during ordinary automated checks. See [contribution guidance](CONTRIBUTING.md).
 
 ## Licenses
 
-Project code: [MIT](LICENSE), Copyright (c) 2026 Svetomir. External sensor integrations are described in [THIRD-PARTY.txt](windows/resources-widget/installer/payload/THIRD-PARTY.txt). External applications retain their own licenses and are not bundled with this release. No provider affiliation or endorsement is implied.
+Project code: [MIT](LICENSE), Copyright (c) 2026 Svetomir. The LibreHardwareMonitor library and PawnIO installer retain their own redistribution terms: [THIRD-PARTY.txt](windows/resources-widget/installer/payload/THIRD-PARTY.txt). Project licensing does not replace dependency terms. No provider affiliation or endorsement is implied.

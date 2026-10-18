@@ -37,7 +37,9 @@ namespace ResourcesWidget
         public double? Read()
         {
             string label;
-            double? t = FromHwinfo(out label);
+            double? t = LocalSensorSnapshot.Read(out label);
+            if (t.HasValue) { Source = "Локальный датчик · " + label; return t; }
+            t = FromHwinfo(out label);
             if (t.HasValue) { Source = "HWiNFO · " + label; return t; }
             t = FromAida(out label);
             if (t.HasValue) { Source = "AIDA64 · " + label; return t; }

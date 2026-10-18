@@ -80,6 +80,11 @@ namespace ResourcesWidget
             var last = latest;
             m.Items.Add(new Separator { Style = sep });
             Add(m, item, Autostart.IsEnabled(), "Запускать вместе с Windows", ToggleAutostart);
+            if (Program.SetupPath != null)
+            {
+                Add(m, item, null, "Установить или обновить локальный датчик температуры…", () => LocalSensorAction(false));
+                Add(m, item, null, "Удалить локальный датчик температуры…", () => LocalSensorAction(true));
+            }
             Add(m, item, null, "Открыть config.json", OpenConfig);
             Add(m, item, null, "Перезапустить (применить config.json)", Restart);
             m.Items.Add(new Separator { Style = sep });
@@ -221,6 +226,12 @@ namespace ResourcesWidget
             string path = cfg.FilePath;
             try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
             catch { Shell("notepad.exe", "\"" + path + "\""); }
+        }
+
+        static void LocalSensorAction(bool remove)
+        {
+            try { Process.Start(new ProcessStartInfo(Program.SetupPath, remove ? "--sensor-remove" : "--sensor") { UseShellExecute = true, WorkingDirectory = Program.BaseDir }); }
+            catch (Exception ex) { MessageBox.Show("Не удалось открыть установку локального датчика: " + ex.Message, "Системные ресурсы"); }
         }
 
         static void Shell(string target, string args = null)

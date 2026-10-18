@@ -27,10 +27,10 @@ foreach ($archive in Get-ChildItem -LiteralPath $artifacts -Filter '*.zip') {
     Expand-Archive -LiteralPath $archive.FullName -DestinationPath $results
 }
 $extract = Join-Path $results 'installer-payload'
-$setup = Join-Path $artifacts 'ResourcesWidgetSetup-1.1.0-x64.exe'
+$setup = Join-Path $artifacts 'ResourcesWidgetSetup-1.1.1-x64.exe'
 $p = Start-Process -FilePath $setup -ArgumentList @('--extract', ('"' + $extract + '"')) -WindowStyle Hidden -PassThru -Wait
 Assert ($p.ExitCode -eq 0) 'Installer payload extraction failed.'
-Assert (@(Get-ChildItem -LiteralPath $extract -File).Count -eq 3) 'Unexpected installer resources.'
+Assert (@(Get-ChildItem -LiteralPath $extract -File).Count -eq 5) 'Unexpected installer resources.'
 foreach ($name in @('ResourcesWidget.exe','config.json')) {
     Assert ((Get-FileHash -LiteralPath (Join-Path $extract $name)).Hash -eq (Get-FileHash -LiteralPath (Join-Path $results ('resources-widget/' + $name))).Hash) "Setup/portable mismatch: $name"
 }
@@ -45,16 +45,17 @@ Assert ($p.ExitCode -eq 1) 'Extraction should refuse an existing directory.'
 Assert ((Get-FileHash -LiteralPath (Join-Path $extract 'config.json')).Hash -eq $before) 'Extraction overwrote an existing config.'
 foreach ($flag in @('--sensor','--with-sensor','--sensor-remove')) {
     $forbidden = Join-Path $results 'sensor-must-not-install'
-    $p = Start-Process -FilePath $setup -ArgumentList @($flag,'--quiet','--dir',('"' + $forbidden + '"')) -WindowStyle Hidden -PassThru -Wait
-    Assert ($p.ExitCode -eq 3 -and -not (Test-Path -LiteralPath $forbidden)) 'Sensor helper did not fail closed before installation.'
     $p = Start-Process -FilePath $setup -ArgumentList @($flag,'--quiet','--extract',('"' + $forbidden + '"')) -WindowStyle Hidden -PassThru -Wait
-    Assert ($p.ExitCode -eq 3 -and -not (Test-Path -LiteralPath $forbidden)) 'Mixed sensor/extract flags did not fail closed before file writes.'
+    Assert ($p.ExitCode -eq 2 -and -not (Test-Path -LiteralPath $forbidden)) 'Mixed sensor/extract flags did not fail closed before file writes.'
 }
+$p = Start-Process -FilePath $setup -ArgumentList @('--sensor','--dry-run','--quiet') -WindowStyle Hidden -PassThru -Wait
+Assert ($p.ExitCode -eq 0) 'Read-only sensor preflight failed.'
 $fw = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
 $refs = @('System.dll','System.Core.dll','System.Xml.dll','System.Xaml.dll','System.Web.Extensions.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Management.dll') | ForEach-Object { Join-Path $fw $_ }
 $refs += @('WindowsBase.dll','PresentationCore.dll','PresentationFramework.dll') | ForEach-Object { Join-Path $fw ('WPF/' + $_) }
 $testExe = Join-Path $results 'NetworkJournalTests.exe'
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'windows/resources-widget/src') -Recurse -Filter '*.cs' | Sort-Object FullName | ForEach-Object { $_.FullName })
+$sources += Join-Path $root 'windows/resources-widget/installer/shared/SensorSecurity.cs'
 $argsCsc = @('/nologo','/target:exe','/platform:x64','/codepage:65001','/utf8output','/main:NetworkJournalTests',"/out:$testExe") + ($refs | ForEach-Object { "/r:$_" }) + $sources + (Join-Path $PSScriptRoot 'tests/NetworkJournalTests.cs')
 & (Join-Path $fw 'csc.exe') @argsCsc
 Assert ($LASTEXITCODE -eq 0) 'Network integration test compilation failed.'
@@ -62,8 +63,10 @@ Assert ($LASTEXITCODE -eq 0) 'Network integration test compilation failed.'
 Assert ($LASTEXITCODE -eq 0) 'Network integration test failed.'
 $installerRoot = Join-Path $root 'windows/resources-widget/installer'
 $installerTest = Join-Path $results 'InstallerFilesystemTests.exe'
-$installerRefs = @('System.dll','System.Core.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Xml.dll','System.Web.Extensions.dll','System.IO.Compression.dll','System.IO.Compression.FileSystem.dll') | ForEach-Object { Join-Path $fw $_ }
+$installerRefs = @('System.dll','System.Core.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Xml.dll','System.Web.Extensions.dll','System.IO.Compression.dll','System.IO.Compression.FileSystem.dll','System.ServiceProcess.dll','Microsoft.CSharp.dll') | ForEach-Object { Join-Path $fw $_ }
 $installerSources = @(Get-ChildItem -LiteralPath (Join-Path $installerRoot 'src') -Filter '*.cs' | Sort-Object FullName | ForEach-Object { $_.FullName })
+$installerSources += Join-Path $installerRoot 'shared/SensorSecurity.cs'
+$installerSources += Join-Path $root 'windows/resources-widget/src/Sensors/LocalSensorSnapshot.cs'
 $installerArgs = @('/nologo','/target:exe','/platform:x64','/codepage:65001','/utf8output','/main:InstallerFilesystemTests',"/out:$installerTest") + ($installerRefs | ForEach-Object { "/r:$_" }) + @(
     "/resource:$(Join-Path $extract 'ResourcesWidget.exe'),payload.ResourcesWidget.exe",
     "/resource:$(Join-Path $extract 'config.json'),payload.config.json",
@@ -73,6 +76,17 @@ $installerArgs = @('/nologo','/target:exe','/platform:x64','/codepage:65001','/u
 Assert ($LASTEXITCODE -eq 0) 'Installer filesystem integration test compilation failed.'
 & $installerTest (Join-Path $results 'installer-filesystem-scratch')
 Assert ($LASTEXITCODE -eq 0) 'Installer filesystem integration test failed.'
+$contractExe = Join-Path $results 'LocalSensorContractTests.exe'
+$contractSources = @((Join-Path $PSScriptRoot 'tests/LocalSensorContractTests.cs'), (Join-Path $installerRoot 'shared/SensorSecurity.cs'), (Join-Path $installerRoot 'src/Authenticode.cs'), (Join-Path $root 'windows/resources-widget/src/Sensors/LocalSensorSnapshot.cs'))
+& (Join-Path $fw 'csc.exe') @('/nologo','/utf8output','/target:exe','/platform:x64','/codepage:65001',"/out:$contractExe") ($installerRefs | ForEach-Object { "/r:$_" }) $contractSources
+Assert ($LASTEXITCODE -eq 0) 'Local sensor contract tests compilation failed.'
+& $contractExe (Join-Path $extract 'PawnIO_setup.exe')
+Assert ($LASTEXITCODE -eq 0) 'Local sensor contract tests failed.'
+Expand-Archive -LiteralPath (Join-Path $extract 'SensorHelper.zip') -DestinationPath (Join-Path $results 'helper')
+Assert (-not (Test-Path -LiteralPath (Join-Path $results 'helper/LibreHardwareMonitor.exe'))) 'GUI/web-server application accidentally included.'
+$helperProbe = Start-Process -FilePath (Join-Path $results 'helper/ResourcesWidgetSensor.exe') -ArgumentList '--probe' -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $results 'helper-probe.json') -RedirectStandardError (Join-Path $results 'helper-probe-error.txt')
+Assert ($helperProbe.ExitCode -eq 0 -or $helperProbe.ExitCode -eq 3) 'Read-only helper library load/probe failed.'
+Get-Content -LiteralPath (Join-Path $results 'helper-probe.json') -Raw | ConvertFrom-Json | Out-Null
 foreach ($widget in @('resources-widget','limits-widget')) {
     $exe = if ($widget -eq 'resources-widget') { 'ResourcesWidget.exe' } else { 'LimitsWidget.exe' }
     $dump = Join-Path $results ($widget + '-dump.json')
@@ -81,6 +95,6 @@ foreach ($widget in @('resources-widget','limits-widget')) {
     Get-Content -LiteralPath $dump -Raw | ConvertFrom-Json | Out-Null
     Assert (-not (Test-Path -LiteralPath (Join-Path $results ($widget + '/state.json')))) 'Headless smoke wrote runtime state.'
 }
-$report = 'PASS: SHA256SUMS; portable allowlists; sanitized configs; embedded payload identity; safe extraction and overwrite refusal; sensor flags fail closed; synthetic network events and journal reload; installer ownership/shared/root/reparse protections and real file install/upgrade/removal preserve user sentinels/config/state/logs; both packaged binaries headless JSON smoke. Profile integration, real installation/driver/UI and profile uninstall were not executed.'
+$report = 'PASS: SHA256SUMS; portable allowlists; sanitized configs; embedded payload identity; extraction and mixed-mode refusal; read-only sensor preflight; snapshot/schema/stale/malformed contract and Windows Authz local-allow/NETWORK-deny proof; pinned native WinVerifyTrust; real helper library-load probe; synthetic network journal; installer dedicated ownership/reparse/data-preservation lifecycle; both packaged EXEs headless smoke. No UAC, driver installation, elevated task or installed-profile lifecycle was performed by this validation.'
 [IO.File]::WriteAllText((Join-Path $results 'validation.txt'), $report, [Text.UTF8Encoding]::new($false))
 Write-Host $report

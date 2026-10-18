@@ -16,7 +16,7 @@ namespace ResourcesWidgetSetup
         public sealed class Settings
         {
             public string Dir;
-            public bool Desktop = true, StartMenu = true, Autostart, Register = true, Launch = true;
+            public bool Desktop = true, StartMenu = true, Autostart, Register = true, Launch = true, Sensor;
         }
 
         public static string DefaultDir
@@ -46,9 +46,10 @@ namespace ResourcesWidgetSetup
                     Autostart = !o.NoAutostart && (o.Autostart || string.Equals(Shortcut.Target(Shortcut.Startup), Path.Combine(o.Dir ?? ExistingDir() ?? DefaultDir, "ResourcesWidget.exe"), StringComparison.OrdinalIgnoreCase)),
                     Register = !o.NoRegister,
                     Launch = !o.NoLaunch,
+                    Sensor = o.WithSensor,
                 };
                 Install(s);
-                return 0;
+                return s.Sensor ? Program.RequestSensor(false) : 0;
             }
             if (!Program.HasNet48() && MessageBox.Show("Не найдена .NET Framework 4.8, без неё виджет не запустится.\nОна входит в Windows 10 начиная с версии 1903 и в Windows 11; для старых версий — dotnet.microsoft.com/download/dotnet-framework/net48.\n\nВсё равно установить?",
                     Program.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
@@ -102,7 +103,7 @@ namespace ResourcesWidgetSetup
             string setup = Path.Combine(dir, "Setup.exe");
             if (!string.Equals(Path.GetFullPath(Program.SelfPath), setup, StringComparison.OrdinalIgnoreCase))
             {
-                File.Copy(Program.SelfPath, setup + ".new", true);
+                Program.CopyApprovedImage(setup + ".new");
                 Payload.Replace(setup + ".new", setup);
             }
 
@@ -137,6 +138,7 @@ namespace ResourcesWidgetSetup
         readonly Button browse = new Button { Text = "Изменить…", AutoSize = true };
         readonly CheckBox desktop = new CheckBox { Text = "Ярлык на рабочем столе", Checked = true, AutoSize = true };
         readonly CheckBox autostart = new CheckBox { Text = "Запускать вместе с Windows", Checked = false, AutoSize = true };
+        readonly CheckBox sensor = new CheckBox { Text = "Локальный датчик температуры процессора (с драйвером PawnIO)", Checked = false, AutoSize = true };
         readonly Label sensorNote = new Label { AutoSize = true, MaximumSize = new Size(470, 0), Padding = new Padding(18, 0, 0, 4) };
         readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(470, 0), Padding = new Padding(0, 10, 0, 6) };
         readonly Button go = new Button { AutoSize = true, MinimumSize = new Size(100, 0) };
@@ -178,8 +180,9 @@ namespace ResourcesWidgetSetup
             root.Controls.Add(dirRow);
             root.Controls.Add(desktop);
             root.Controls.Add(autostart);
+            root.Controls.Add(sensor);
 
-            sensorNote.Text = "Температура процессора доступна от уже настроенных HWiNFO, AIDA64 или Core Temp. Этот выпуск не устанавливает датчики или драйверы.";
+            sensorNote.Text = "По выбору: защищённый локальный помощник читает датчики без сетевого сервера. Его собственная задача SYSTEM запускается при входе пользователя. Windows запросит права администратора. Драйвер PawnIO ставится только при необходимости; внешние программы мониторинга не изменяются.";
             sensorNote.ForeColor = SystemColors.GrayText;
             root.Controls.Add(sensorNote);
             root.Controls.Add(status);
@@ -219,8 +222,9 @@ namespace ResourcesWidgetSetup
                 Register = !opts.NoRegister,
                 Launch = !opts.NoLaunch,
                 StartMenu = !opts.NoStartMenu,
+                Sensor = sensor.Checked,
             };
-            foreach (Control c in new Control[] { go, cancel, browse, desktop, autostart }) c.Enabled = false;
+            foreach (Control c in new Control[] { go, cancel, browse, desktop, autostart, sensor }) c.Enabled = false;
             var t = new Thread(() =>
             {
                 string result;
@@ -228,6 +232,11 @@ namespace ResourcesWidgetSetup
                 {
                     Installer.Install(settings);
                     result = "Готово: виджет запущен — значок в трее, карточка по Ctrl+Alt+R.";
+                    if (settings.Sensor)
+                    {
+                        int code = Program.RequestSensor(false);
+                        result += code == 0 ? "\nЛокальный датчик температуры работает." : code == 3 ? "\nПомощник установлен, но температура пока недоступна. Проверьте локальный журнал датчика." : "\nДатчик не установлен (код " + code + "). Повторить можно через меню виджета.";
+                    }
 
                     ExitCode = 0;
                 }

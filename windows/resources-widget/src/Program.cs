@@ -9,8 +9,8 @@ using System.Windows;
 [assembly: AssemblyTitle("Системные ресурсы")]
 [assembly: AssemblyProduct("ResourcesWidget")]
 [assembly: AssemblyDescription("Виджет в трее: процессор, память, видеокарта, диски, сеть и процессы")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
 
 namespace ResourcesWidget
 {
@@ -61,6 +61,7 @@ namespace ResourcesWidget
         public const string ShowEventName = "Local\\ResourcesWidget.Show";
         public const string ExitEventName = "Local\\ResourcesWidget.Exit";
         public static string BaseDir;
+        public static string SetupPath { get { string p = Path.Combine(BaseDir, "Setup.exe"); return File.Exists(p) ? p : null; } }
 
         // Журнал сети: network-log рядом с exe.
         public static string NetLogDir

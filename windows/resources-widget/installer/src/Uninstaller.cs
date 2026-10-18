@@ -17,6 +17,9 @@ namespace ResourcesWidgetSetup
             if (!o.Quiet && MessageBox.Show("Удалить «" + Program.AppName + "»? Настройки, журналы и остальные файлы будут сохранены.", Program.AppName,
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return 2;
+            if (!o.Quiet && Directory.Exists(ResourcesWidgetSensor.SensorSecurity.UserDirectory(LocalSensorInstall.CurrentSid))
+                && MessageBox.Show("Удалить и собственный локальный датчик температуры с его задачей SYSTEM? Windows запросит подтверждение администратора. Общий драйвер PawnIO и внешние программы мониторинга останутся.", Program.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                Program.RequestSensor(true);
 
             string tmp = Path.Combine(Path.GetTempPath(), "ResourcesWidget-uninstall-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".exe");
             File.Copy(Program.SelfPath, tmp, true);

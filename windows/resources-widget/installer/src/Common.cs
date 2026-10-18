@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Versioning;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
@@ -14,8 +15,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Системные ресурсы — установка")]
 [assembly: AssemblyProduct("ResourcesWidget")]
 [assembly: AssemblyDescription("Установка виджета «Системные ресурсы»")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
 
 namespace ResourcesWidgetSetup
 {
@@ -28,6 +29,7 @@ namespace ResourcesWidgetSetup
     {
         public bool Quiet, Uninstall, UninstallRun, Sensor, SensorRemove, DryRun, Fresh, WithSensor;
         public bool NoDesktop, NoStartMenu, NoAutostart, NoRegister, NoLaunch, Autostart;
+        public bool SensorStart, SensorStop, SensorStatus;
         public string Dir, LogPath, ForUser, ExtractDir;
         public int WaitPid;
 
@@ -44,6 +46,9 @@ namespace ResourcesWidgetSetup
                     case "--uninstall-run": o.UninstallRun = true; break;
                     case "--sensor": o.Sensor = true; break;
                     case "--sensor-remove": o.SensorRemove = true; break;
+                    case "--sensor-start": o.SensorStart = true; break;
+                    case "--sensor-stop": o.SensorStop = true; break;
+                    case "--sensor-status": o.SensorStatus = true; break;
                     case "--dry-run": o.DryRun = true; break;
                     case "--dry-run-fresh": o.DryRun = o.Fresh = true; break;
                     case "--with-sensor": o.WithSensor = true; break;
@@ -87,21 +92,24 @@ namespace ResourcesWidgetSetup
 
     static class Program
     {
+        static FileStream imageLock;
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        static extern bool SetDefaultDllDirectories(uint flags);
         public const string AppName = "Системные ресурсы";
-        public const string Version = "1.1.0";
+        public const string Version = "1.1.1";
         public const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\ResourcesWidget";
         public static Options Opts;
 
         [STAThread]
         static int Main(string[] args)
         {
+            // Keep the approved source image immutable while elevated resources/manager are copied.
+            // FileShare.Read denies writes and rename/delete by medium-integrity processes.
+            HoldSourceImage();
+            if (!SetDefaultDllDirectories(0x00000800)) return 2; // installer native dependencies: System32 only
             Opts = Options.Parse(args);
-            if (Opts.Sensor || Opts.SensorRemove || Opts.WithSensor)
-            {
-                const string message = "Этот выпуск не устанавливает и не удаляет сторонние датчики. Используйте отдельно настроенные HWiNFO, AIDA64 или Core Temp.";
-                if (!Opts.Quiet) MessageBox.Show(message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return 3;
-            }
+            if (Opts.ExtractDir != null && (Opts.Sensor || Opts.SensorRemove || Opts.WithSensor || Opts.SensorStart || Opts.SensorStop || Opts.SensorStatus)) return 2;
             // Извлечение только файлов: не создаёт GUI, ярлыки, ключи реестра, процессы или драйверы.
             if (Opts.ExtractDir != null)
             {
@@ -112,6 +120,7 @@ namespace ResourcesWidgetSetup
             Application.SetCompatibleTextRenderingDefault(false);
             try
             {
+                if (Opts.Sensor || Opts.SensorRemove || Opts.SensorStart || Opts.SensorStop || Opts.SensorStatus) return LocalSensorInstall.Start(Opts);
                 if (Opts.UninstallRun) return Uninstaller.RunFromTemp(Opts);
                 if (Opts.Uninstall) return Uninstaller.Start(Opts);
                 return Installer.Start(Opts);
@@ -121,6 +130,30 @@ namespace ResourcesWidgetSetup
                 Log.Write("ошибка: " + ex);
                 if (!Opts.Quiet) MessageBox.Show(ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
+            }
+        }
+
+        public static int RequestSensor(bool remove)
+        {
+            try { return LocalSensorInstall.Start(new Options { Sensor = !remove, SensorRemove = remove, ForUser = LocalSensorInstall.CurrentSid }); }
+            catch (System.ComponentModel.Win32Exception ex) { if (ex.NativeErrorCode == 1223) return 2; throw; }
+        }
+        public static void ReleaseProtectedManagerImageLock()
+        {
+            if (imageLock != null) { imageLock.Dispose(); imageLock = null; }
+        }
+        public static void HoldSourceImage()
+        {
+            if (imageLock == null) imageLock = new FileStream(Assembly.GetExecutingAssembly().Location, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+        public static void CopyApprovedImage(string destination)
+        {
+            HoldSourceImage();
+            lock (imageLock)
+            {
+                imageLock.Position = 0;
+                using (var target = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None)) imageLock.CopyTo(target);
+                imageLock.Position = 0;
             }
         }
 
