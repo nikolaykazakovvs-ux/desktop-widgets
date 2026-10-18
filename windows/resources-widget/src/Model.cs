@@ -216,10 +216,10 @@ namespace ResourcesWidget
         public List<string> Disks = new List<string>();     // пусто — все локальные диски
         public bool NetworkBits = true;
         public int TopProcesses = 5;
-        public string LhmUrl = "";   // веб-сервер LibreHardwareMonitor; пусто — не опрашивать
+        public string LhmUrl = "http://127.0.0.1:8085/data.json";   // локальный веб-сервер LibreHardwareMonitor; пусто — не опрашивать
         public string GpuSource = "auto";                           // auto — NVML для NVIDIA; windows — всегда статистика WDDM
         public int InternetMbps;                                    // скорость тарифа для «% канала» в журнале сети; 0 — по скорости адаптера
-        public string PingHost = "";                         // узел в интернете для проверки связи; пусто — не пинговать
+        public string PingHost = "1.1.1.1";                  // узел в интернете для проверки связи; пусто — не пинговать
         public int PingIntervalSec = 2;
         public int PingWarnMs = 150;                                // выше — «высокий пинг»
         public string FilePath;

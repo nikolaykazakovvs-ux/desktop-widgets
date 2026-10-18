@@ -1,0 +1,13 @@
+ResourcesWidget external sensor integrations
+===========================================
+
+This release contains the ResourcesWidget application only. It does not bundle, install, start, configure or remove LibreHardwareMonitor, PawnIO or any other sensor application or driver. External tools remain independently installed and licensed products.
+
+ResourcesWidget can read locally available measurements from compatible HWiNFO, AIDA64, Core Temp and other existing monitoring applications. These products are not required for the core CPU/memory/GPU/disk/network functionality. Optional local HTTP polling defaults to http://127.0.0.1:8085/data.json and does not start a server. An empty lhmUrl disables this client-side polling.
+
+Automatic installation of LibreHardwareMonitor/PawnIO from the original private installer is deliberately omitted from this public preview: the pinned unmodified upstream LibreHardwareMonitor 0.9.6 HTTP implementation cannot guarantee loopback-only listening under its supported configuration and can expose unauthenticated hardware-control endpoints. This release creates no such service and adds no firewall rules. Configure external sensor software independently according to its own documentation.
+
+Upstream documentation and licenses:
+LibreHardwareMonitor (MPL 2.0): https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/tree/v0.9.6
+PawnIO official signed binary installer (proprietary, redistributable) versus GPL/LGPL source editions: https://github.com/namazso/PawnIO.Modules/wiki/Using-PawnIO-Modules#licensing-considerations
+No binaries from either project are distributed in this release. ResourcesWidget source is licensed separately under the repository LICENSE.

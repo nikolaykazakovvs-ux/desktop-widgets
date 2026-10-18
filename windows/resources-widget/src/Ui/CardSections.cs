@@ -83,8 +83,7 @@ namespace ResourcesWidget
         static string TempTip(CpuInfo c)
         {
             if (c.Temp.HasValue) return "температура " + Fmt.Num(c.Temp.Value, 0) + Fmt.Nbsp + "°C — из " + c.TempSource;
-            return "Температура: нет данных. Windows не отдаёт её обычным программам — виджет берёт её\nу HWiNFO, AIDA64, Core Temp или LibreHardwareMonitor, пока одна из них запущена.\nУ LibreHardwareMonitor должен быть включён веб-сервер: Options → Remote Web Server → Run."
-                + (Program.SetupPath != null ? "\nУстановить или запустить LibreHardwareMonitor: меню ⋯ → «Датчик температуры процессора…»." : "");
+            return "Температура: нет данных. Windows не отдаёт её обычным программам — виджет читает\nуже настроенные внешние источники HWiNFO, AIDA64, Core Temp или LibreHardwareMonitor.\nЭтот выпуск не устанавливает датчики и не запускает серверы.";
         }
 
         FrameworkElement Memory(Sample s)

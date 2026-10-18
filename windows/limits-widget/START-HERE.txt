@@ -1,0 +1,23 @@
+ЛИМИТЫ НЕЙРОСЕТЕЙ 1.0.0 / AI LIMITS WIDGET 1.0.0
+
+РУССКИЙ
+
+Готовая программа для Windows 10/11 с .NET Framework 4.8. Собирать исходники не нужно. Распакуйте всю папку limits-widget в обычную папку с правом записи и запустите LimitsWidget.exe. Не запускайте EXE внутри ZIP; config.json должен оставаться рядом.
+
+Карточка открывается значком в области уведомлений Windows или Ctrl+Alt+L. Автозапуск включается отдельно в меню значка и по умолчанию выключен. Для выхода используйте меню значка.
+
+Первый запуск не подключён к вашим аккаунтам: все провайдеры в config.json изначально выключены. Отсутствие данных не означает нулевые лимиты. Включите только нужные вам сервисы: в объекте services у claude, kimi, antigravity или codex поменяйте enabled с false на true, сохранив корректный JSON. Затем сохраните файл и нажмите обновление в меню. Период обновления — 300 секунд.
+
+Для выбранного сервиса заранее установите его официальное приложение/CLI и выполните штатный вход в свой аккаунт. Виджет использует доступные локальные приложения и их интерфейсы: Claude Code, Codex, Kimi Code, Antigravity. Если команда не находится, задайте её полный путь в поле command соответствующего сервиса. Это не сервис для покупки подписок и не общий счётчик расходов API: поддержка зависит от интерфейсов конкретного провайдера.
+
+allowLocalTokens изначально false. В частности, прямой резервный запрос Kimi, если локальный сервер приложения недоступен, потребует явного разрешения читать локальный токен: это отдельное осознанное изменение данного флага. Не вставляйте пароли или токены в config.json. Ошибка/NO_DATA показывается, если источник недоступен; прежнее измерение может быть помечено устаревшим. Не принимайте старое значение за текущую квоту.
+
+config.json хранит настройки: в публичном пакете находится общий шаблон. state.json с положением карточки и последними данными создаётся на вашем компьютере и не входит в публичный пакет. Для обновления сначала завершите виджет через меню и сохраните копию всей папки. Распакуйте новый EXE, сохранив свои config.json/state.json. Приложение не имеет цифровой подписи; Windows может показать предупреждение о неизвестном издателе.
+
+ENGLISH
+
+Ready-to-run Windows 10/11 application with .NET Framework 4.8. Extract the complete limits-widget folder to a writable location and run LimitsWidget.exe. No source build is needed; keep config.json beside the EXE and do not launch inside the ZIP. Click the tray icon or press Ctrl+Alt+L to open the card. Windows startup is opt-in through the tray menu; quit from the same menu.
+
+All account providers are disabled in the supplied config.json. No data does not mean zero quota. Enable only the services you use: set enabled to true under services.claude, services.kimi, services.antigravity or services.codex, then save valid JSON and refresh from the tray menu. The default refresh interval is 300 seconds. Install and sign into each selected provider's official local application/CLI first. A provider's command field can specify its full CLI path. These are provider-specific subscription quota sources, not a universal API-spend meter.
+
+allowLocalTokens is false by default. Kimi's direct fallback, when its local application server is unavailable, needs an explicit opt-in to read its local token. Do not put passwords or tokens in config.json. Errors/NO_DATA indicate unavailable sources; cached snapshots may be stale and are not confirmed current quotas. Your generated state.json contains the window state and recent results. Before updating, quit the widget, back up its folder and preserve your config.json/state.json while replacing the executable. The application is unsigned; Windows may display an unknown-publisher warning.

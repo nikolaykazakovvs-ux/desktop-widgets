@@ -1,0 +1,23 @@
+СИСТЕМНЫЕ РЕСУРСЫ 1.1.0 / RESOURCES WIDGET 1.1.0
+
+РУССКИЙ
+
+Готовая программа для Windows 10 (1903+) / Windows 11, x64, .NET Framework 4.8. Собирать исходники не нужно. Распакуйте всю папку resources-widget в обычную папку с правом записи и запустите ResourcesWidget.exe. Не запускайте программу прямо внутри ZIP и не переносите один EXE без config.json.
+
+Значок появляется в области уведомлений Windows. Карточка открывается щелчком по значку или Ctrl+Alt+R. Через меню значка можно включить автозапуск; по умолчанию он выключен. Выход — через меню значка. Закрепление поверх окон, разделы, тема, масштаб и компактный режим настраиваются там же.
+
+Сеть работает сразу: скорости, пиковые значения, трафик, ICMP-пинг до основного шлюза (роутера) и 1.1.1.1 каждые 2 секунды. Щелчок по пикам открывает журнал: дни, минутные графики, потери, обрывы, высокий пинг и смена скорости соединения. Локальные файлы network-log сохраняются на 400 дней. Учитывается только этот компьютер и только время работы виджета. Поле internetMbps в config.json задаёт скорость вашего тарифа; 0 использует скорость адаптера. Пустой pingHost отключает оба пинга. После правки config.json используйте перезапуск из меню.
+
+Температура процессора появляется при наличии совместимого внешнего источника: отдельно настроенных HWiNFO, AIDA64, Core Temp или LibreHardwareMonitor. По умолчанию клиент читает локальный адрес http://127.0.0.1:8085/data.json; пустой lhmUrl отключает опрос. Виджет не запускает и не настраивает сервер. Ни ZIP, ни публичный установщик не содержат и не устанавливают программы датчиков или драйверы. Автоматическая установка из прежнего локального установщика в этот выпуск не перенесена: его HTTP-помощник мог открыть незащищённый сервер в сети.
+
+Установщик ставит сам виджет для текущего пользователя в %LOCALAPPDATA%\Programs\ResourcesWidget, создаёт ярлыки и запись в установленных приложениях. Обновление сохраняет config.json и state.json; перед обновлением сохраните копию всей папки вместе с network-log. Установщик принимает отдельную новую/пустую папку либо подтверждённую установку. Удаление убирает известные файлы приложения; настройки, журналы и посторонние файлы сохраняются в папке. Сам виджет и установщик не имеют цифровой подписи; Windows может показать предупреждение о неизвестном издателе. Подробности сторонних компонентов — THIRD-PARTY.txt.
+
+ENGLISH
+
+Ready-to-run Windows 10 (1903+) / Windows 11 x64 application; .NET Framework 4.8 is required. Extract the entire resources-widget folder to a writable location and run ResourcesWidget.exe. No source build is required. Keep config.json beside the EXE. Do not run inside the ZIP.
+
+Open the tray card by clicking its icon or pressing Ctrl+Alt+R. Use the tray menu to quit or opt into Windows startup; startup is disabled by default. The menu also controls theme, size, compact view, visible sections and always-on-top.
+
+Network monitoring is enabled: traffic, peaks, ICMP probes to your default gateway and 1.1.1.1 every two seconds. Click the network peaks to open daily history, minute graphs and connection events. Local network-log files are retained for 400 days and cover only this computer while the widget is running. Set internetMbps to your plan speed; 0 uses adapter link speed. Set pingHost to an empty string to disable both probes. Restart from the tray menu after editing config.json.
+
+CPU temperature needs an independently configured compatible external sensor application, such as HWiNFO, AIDA64, Core Temp or LibreHardwareMonitor. The default optional local client endpoint is http://127.0.0.1:8085/data.json; an empty lhmUrl disables polling. The widget never starts or configures a server. Neither this ZIP nor the public installer contains or installs sensor applications or drivers. Automatic sensor installation from the old private installer is omitted because its HTTP helper could expose an unauthenticated network server. Setup accepts a new/empty dedicated folder or a verified existing installation, installs for the current user, creates shortcuts and an Apps entry, and preserves config.json/state.json during updates. Startup is opt-in. Back up your widget folder before updating. Uninstall removes known application binaries and preserves settings, logs and unrelated files. Widget/setup are unsigned and Windows may display an unknown-publisher warning. External integration details are in THIRD-PARTY.txt.

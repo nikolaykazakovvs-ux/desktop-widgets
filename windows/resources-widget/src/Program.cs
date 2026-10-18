@@ -68,16 +68,6 @@ namespace ResourcesWidget
             get { return Path.Combine(BaseDir, "network-log"); }
         }
 
-        // Установщик рядом с виджетом (есть после установки): через него ставится датчик температуры. null — его нет.
-        public static string SetupPath
-        {
-            get
-            {
-                string p = Path.Combine(BaseDir, "Setup.exe");
-                return File.Exists(p) ? p : null;
-            }
-        }
-
         [STAThread]
         static int Main(string[] args)
         {

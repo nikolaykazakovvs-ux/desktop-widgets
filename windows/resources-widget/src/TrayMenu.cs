@@ -78,8 +78,6 @@ namespace ResourcesWidget
             Add(m, item, null, "Диспетчер задач", () => Shell("taskmgr.exe"));
             Add(m, item, null, "Монитор ресурсов", () => Shell("resmon.exe"));
             var last = latest;
-            if (Program.SetupPath != null && (last == null || last.Cpu == null || !last.Cpu.Temp.HasValue))
-                Add(m, item, null, "Датчик температуры процессора…", InstallTempSensor);
             m.Items.Add(new Separator { Style = sep });
             Add(m, item, Autostart.IsEnabled(), "Запускать вместе с Windows", ToggleAutostart);
             Add(m, item, null, "Открыть config.json", OpenConfig);
@@ -215,19 +213,6 @@ namespace ResourcesWidget
             {
                 Log.Write("autostart: " + ex.Message);
                 MessageBox.Show("Не удалось изменить автозапуск: " + ex.Message, "Системные ресурсы");
-            }
-        }
-
-        // Установщик ставит и запускает LibreHardwareMonitor с драйвером PawnIO; Windows спросит подтверждение администратора.
-        static void InstallTempSensor()
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo(Program.SetupPath, "--sensor") { UseShellExecute = true, Verb = "runas", WorkingDirectory = Program.BaseDir });
-            }
-            catch (System.ComponentModel.Win32Exception ex)
-            {
-                if (ex.NativeErrorCode != 1223) Log.Write("sensor setup: " + ex.Message);   // 1223 — отказ в окне UAC
             }
         }
 

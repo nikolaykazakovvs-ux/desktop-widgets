@@ -1,92 +1,102 @@
 # Desktop Widgets
 
-[Русский](README.ru.md) · [Project page](https://nikolaykazakovvs-ux.github.io/desktop-widgets/)
+[Русский](README.ru.md) · [Project page](https://nikolaykazakovvs-ux.github.io/desktop-widgets/) · [Download v0.1.0](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.0)
 
-Two compact Windows desktop widgets: **AI Limits** keeps subscription usage windows in view; **System Resources** shows hardware load and network activity. Native C# / Windows Presentation Foundation (WPF), with tray menus, configurable hotkeys, light/dark themes and movable cards. The application interface is currently Russian.
+Two independent Windows widgets. **System Resources** monitors your computer and keeps a detailed network journal. **AI Limits** shows subscription usage windows and reset times. Use either on its own. Native C# and Windows Presentation Foundation (WPF); the application interface is currently Russian.
 
-## Platforms
+## Download and run
 
-Desktop Widgets is the umbrella project. **This distribution is the Windows section**, under `windows/`.
+First public alpha collection: **v0.1.0**. Requirements: **Windows 10/11 x64 and .NET Framework 4.8**. macOS and Linux are planned separately; neither has an implementation or download yet.
 
-| Platform | Availability |
-| --- | --- |
-| Windows | Alpha source package in this repository |
-| macOS | Planned separately; no implementation or download available |
-| Linux | Planned separately; no implementation or download available |
+| Application | Download | Start |
+| --- | --- | --- |
+| System Resources 1.1.0 | [Windows installer](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.0/ResourcesWidgetSetup-1.1.0-x64.exe) | Open the installer; it shows the card after installation |
+| System Resources 1.1.0 | [Portable ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.0/ResourcesWidget-1.1.0-win-x64.zip) | Extract to a writable folder and open ResourcesWidget.exe |
+| AI Limits 1.0.0 | [ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.0/LimitsWidget-1.0.0-win.zip) | Extract, open LimitsWidget.exe, then enable the sources you need |
 
-**Alpha, source distribution.** No signed installer or release download is provided by this repository. Provider integrations depend on upstream applications and may change. A successful local compilation does not establish compatibility across Windows versions or hardware.
+[Release notes, assets and SHA-256 checksums](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.0). Applications and installer are unsigned; Windows may warn about an unknown publisher. Follow your organisation's policies on managed computers.
 
-## AI Limits
+The resources installer installs for the current user into a new/empty dedicated folder or a verified existing installation, adds shortcuts and an uninstall entry, and preserves configuration and window state on upgrade. **Startup is opt-in.** Uninstall removes known application binaries while preserving settings, network history and unrelated files. This first public preview does not bundle, install, start or configure sensor applications or drivers; use independently configured external sensors.
 
-Separate cards for Claude Code, Kimi Code, Antigravity and GPT / Codex. Shows available usage windows, reset times, credits or extra usage when returned by a source. Failed refreshes can retain a previous snapshot marked stale; missing data is not interpreted as zero usage. Card order, scale, opacity, pinning and compact view are configurable.
-
-All providers are **disabled by default**, including when the configuration is absent. Enable only the providers you intend to query. Refreshes are automatic once enabled (default 300 seconds; minimum 60). This is a local application, not an official provider product.
-
-| Provider | Implemented source and access |
-| --- | --- |
-| Claude Code | Runs the locally installed `claude` CLI: a streaming `get_usage` control request, with `/usage` fallback. If CLI authentication is missing, may read the Claude desktop application's local `plan-usage-history.json` usage cache. A user-triggered login action can launch CLI authentication. |
-| GPT / Codex | Runs `codex app-server` and requests `account/rateLimits/read` over standard input/output. Authentication is handled by the installed CLI. |
-| Antigravity | Runs `agy -p "/usage" --output-format json` and, for credits, `/credits`. Authentication is handled by the installed CLI. These integrations require a compatible CLI; compatibility is not guaranteed for every version. |
-| Kimi Code | Discovers a running local Kimi Code server from its instance metadata and reads its `server.token` to authenticate a loopback usage request. **This local server token is read even when `allowLocalTokens` is false.** With `allowLocalTokens: true`, a fallback reads an OAuth access token from Kimi Code's local credential files and sends it to the configured Kimi usage endpoint. No automatic token refresh is performed by the widget. |
-
-`allowLocalTokens` controls only the **Kimi direct credential fallback**, not all authentication or credential access. Review the provider sources before enabling them. Do not point the Kimi `baseUrl` at an untrusted endpoint: the fallback sends the bearer token there. The supplied configuration disables that fallback.
+Click the tray icon to show or hide a card. Default hotkeys: **Ctrl+Alt+R** for resources, **Ctrl+Alt+L** for limits. Tray menus offer themes, scale, opacity, pinning, startup and exit. First launch does not automatically enable Windows startup or change tray icon visibility. Data is stored beside the application, so ZIP distributions need a writable folder. Another copy may show an already-running instance of the same widget.
 
 ## System Resources
 
-CPU load, per-thread activity, RAM, GPU, disks, network speeds and leading processes. Includes a local network journal with traffic, peaks and interruptions. GPU readings use NVIDIA's driver interface where available and Windows Display Driver Model (WDDM) statistics otherwise. CPU temperature can be read from compatible, separately installed monitoring software (HWiNFO, AIDA64, Core Temp, LibreHardwareMonitor or OpenHardwareMonitor); availability depends on hardware, permissions and the external application.
+For work and home computers, including investigating bottlenecks on older PCs:
 
-No monitoring driver, sensor installer or third-party binary is bundled. The existing installer integration remains in source but no setup program is distributed here. Unavailable sensor values remain unavailable. The public defaults disable external ping probes and the optional LibreHardwareMonitor HTTP endpoint. Enable `pingHost` or `lhmUrl` explicitly if desired. Local hardware sampling and network journaling still run when the widget starts.
+- **CPU:** overall and per-logical-processor activity, history, frequency, temperature when a sensor is available, process/thread counts.
+- **Memory:** used, available, committed and cached.
+- **GPU:** load, video memory and available temperature, power, clock and fan readings.
+- **Disks:** used/free capacity, reads/writes per drive and combined totals.
+- **Processes:** leading CPU or memory users, grouped by executable name.
+- **Network:** current speed, peaks, ping, link speed, daily traffic and connection events.
 
-## Build and run from source
+[![System Resources: actual application card](docs/images/resources-card.png)](docs/images/resources-card.png)
 
-Requirements: Windows x64, Windows PowerShell and .NET Framework 4.8 with its 64-bit C# compiler and WPF assemblies. The scripts use the Windows Framework compiler; no .NET SDK or package installation is required. Windows 10/11 x64 are intended targets; there is no published compatibility test matrix yet.
+Actual application interface and system readings; additional sensors depend on hardware and configuration. Click for full size.
 
-Run in **Windows PowerShell**, from the repository root:
+### Network journal
+
+Click the peaks in the card to open daily history. Each day shows a short-interval peak, the highest one-minute average, timestamps, percentage of configured capacity, traffic and average latency. Open a day for minute-by-minute speed and router/external-host ping graphs, losses, observed time and events:
+
+- adapter link-speed changes, such as 1 Gbps to 100 Mbps;
+- adapter disconnects;
+- repeated external-host nonresponses, compared with router replies;
+- sustained high latency.
+
+| Daily journal | Day details |
+| --- | --- |
+| [![Network journal](docs/images/network-journal.png)](docs/images/network-journal.png) | [![Day details](docs/images/network-day.png)](docs/images/network-day.png) |
+
+Actual application interface; controlled, anonymised demo data. Local network-log files contain daily summaries, minute CSV files and events, retained for up to 400 days.
+
+**Measurement boundaries.** The journal observes this computer while the widget runs, including local network traffic; it does not meter every device at home. The short peak depends on the sampling interval (about one second by default); the minute peak uses a rolling average of approximately 60 seconds. Capacity percentage uses the configured plan speed or adapter link speed, not a test of available Internet bandwidth. It helps describe observed load but cannot alone determine the right Internet plan.
+
+External ping defaults to **1.1.1.1**, the router is discovered automatically, and the interval is two seconds. Empty pingHost disables probes. Internet Control Message Protocol (ICMP) replies can be filtered or rate-limited. Router/external comparisons help investigation but do not conclusively identify the provider, router or cable as the cause.
+
+GPU readings use NVIDIA's driver interface and Windows Display Driver Model (WDDM) statistics. CPU temperature can come from compatible HWiNFO, AIDA64, Core Temp or LibreHardwareMonitor. The optional client reads an already configured local LibreHardwareMonitor at 127.0.0.1:8085; it never starts or configures a server. Without an external source, temperature remains unavailable. Empty lhmUrl disables that polling. Sensor availability depends on hardware, driver and helper permissions.
+
+The WDDM path has been checked on an NVIDIA RTX 3070; AMD and Intel have not been separately tested on real hardware. There is no verified older-PC compatibility or overhead matrix. Assess the widget and optional helper on the intended computer. [Comparison with other tools](docs/comparison.md).
+
+## AI Limits
+
+Claude Code, Kimi Code, Antigravity and GPT / Codex in one card: available usage windows, reset times, credits and extra usage when a source returns them. A failed refresh can retain a previous snapshot marked stale. Missing data is not interpreted as zero usage.
+
+[![AI Limits: actual application with test data](docs/images/limits-card.png)](docs/images/limits-card.png)
+
+Actual application interface; demo data. No personal account snapshot is shown.
+
+**All providers are disabled by default**, including when configuration is absent. Enabled providers refresh automatically (default 300 seconds, minimum 60). Sign in through the installed provider application or command-line interface (CLI), then enable only the required services.<provider>.enabled field in local config.json. An optional command field selects the installed CLI. Do not put credentials in configuration.
+
+| Provider | Implemented source and access |
+| --- | --- |
+| Claude Code | Installed claude CLI: streaming get_usage request with /usage fallback. If CLI authentication is missing, may read the Claude desktop application's local usage cache. A user-triggered login action launches CLI authentication. |
+| GPT / Codex | codex app-server and account/rateLimits/read; authentication belongs to the CLI. |
+| Antigravity | agy /usage and /credits; needs a compatible installed CLI and its authentication. |
+| Kimi Code | Running local application server and its server.token for authenticated loopback requests. This server token is read even when allowLocalTokens is false. Enabling allowLocalTokens permits an OAuth access-token fallback using local Kimi credential files and the configured endpoint. The widget does not refresh that token itself. |
+
+allowLocalTokens controls only Kimi's direct fallback, not all authentication access. It is disabled in the distribution. Do not use an untrusted baseUrl: the direct fallback sends its bearer token there. Provider application compatibility can change; this is an independent project.
+
+## Data and privacy
+
+Settings, snapshots and journals stay beside the applications. Resources probes its configured ping host and may poll a local sensor helper; limits queries explicitly enabled sources. Exports can include device/process/adapter names, paths and activity history. Inspect and redact before sharing. Personal configuration, account data and logs are excluded from the repository and public archives.
+
+The project page is static HTML, without analytics, account queries or external fonts. It uses actual WPF exports: real system readings for resources and controlled demo data for network history and limits.
+
+## Developers
+
+Sources: windows/resources-widget and windows/limits-widget. docs is a standalone GitHub Pages site, without a build step. Builds require Windows PowerShell and the .NET Framework 4.8 compiler; no separate .NET SDK is required.
+
+Run in Windows PowerShell from the repository root; intended for developers or the Codex agent:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\limits-widget\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\resources-widget\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\limits-widget\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\resources-widget\installer\build-setup.ps1
 ```
 
-Each build copies `config.example.json` to an untracked `config.json` only if it does not exist, then compiles the executable alongside the source. Build scripts never request that a running widget exit. A running output executable must be closed manually before rebuilding it.
+Application build scripts do not stop a running widget or overwrite existing config.json. The widget-only installer builds from these sources without downloads or third-party binary payloads. Do not query personal accounts during ordinary automated checks. See [contribution guidance](CONTRIBUTING.md).
 
-Run in **Windows PowerShell**, from the repository root:
+## Licenses
 
-```powershell
-.\windows\limits-widget\LimitsWidget.exe --show
-.\windows\resources-widget\ResourcesWidget.exe --show
-```
-
-Before enabling a provider, sign in using its own supported application/CLI workflow. Open `windows/limits-widget/config.json` locally and change only the required `services.<provider>.enabled` field to `true`. Optional `command` fields can point to locally installed CLI executables; no personal paths are supplied. Keep credentials out of configuration and issues.
-
-Tray click toggles the card. Default hotkeys: **Ctrl+Alt+L** for AI Limits and **Ctrl+Alt+R** for System Resources. Tray menus expose theme, pinning, size and startup choices. **Starting either public widget does not automatically enable Windows startup or change notification-area visibility.** Startup is an explicit tray-menu action. Exit via the tray menu.
-
-The application folder must be writable: widgets keep local settings, snapshots and logs beside their executable. Avoid a protected system folder. A named per-user single-instance mechanism means running another copy of the same widget may show the already-running copy.
-
-## Local data and privacy
-
-- AI Limits writes `state.json` (window settings, usage snapshots and credit history) and diagnostic `widget.log` locally. It invokes enabled provider CLIs and makes the Kimi requests described above; those services apply their own network and authentication behavior.
-- System Resources writes local state, diagnostic logs and `network-log/` journals. Logs and exports can contain hardware identifiers, process names, adapters, usage information and diagnostic paths. Review and redact before sharing.
-- No account files, real usage fixtures, logs, local configuration or compiled binaries are included in this repository. They are ignored by Git. `.gitignore` does not sanitize an export or undo an accidentally committed file.
-- The static project page has no application backend, provider calls, analytics or external fonts. Its widget cards contain **simulated data**, not a live account snapshot or a screenshot of a running app.
-
-## Layout
-
-```text
-windows/limits-widget/       AI limits application source, icon, build script and example config
-windows/resources-widget/    System resources application source, icon, build script and example config
-docs/                Standalone GitHub Pages site (no build step)
-CONTRIBUTING.md      Contribution and verification guidance
-```
-
-Open `docs/index.html` directly to preview the page, or serve `docs/` with any static HTTP server. GitHub Pages can publish the `docs` folder on `main`; all site resources are relative to support `/desktop-widgets/`.
-
-## Verification and current limits
-
-This package was compiled locally with the installed Windows Framework compiler. Configuration JSON and static links were checked. No authenticated provider requests, interactive application launch, hardware matrix, installer, signing or automatic update verification was performed for this distribution. See [contribution guidance](CONTRIBUTING.md) for useful reports.
-
-## License
-
-[MIT License](LICENSE), Copyright (c) 2026 Svetomir. No third-party provider affiliation or endorsement is implied.
-
-
+Project code: [MIT](LICENSE), Copyright (c) 2026 Svetomir. External sensor integrations are described in [THIRD-PARTY.txt](windows/resources-widget/installer/payload/THIRD-PARTY.txt). External applications retain their own licenses and are not bundled with this release. No provider affiliation or endorsement is implied.

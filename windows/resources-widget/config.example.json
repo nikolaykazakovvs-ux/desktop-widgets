@@ -4,11 +4,11 @@
   "pingWarnMs": 150,
   "pingIntervalSec": 2,
   "historySeconds": 60,
-  "pingHost": "",
+  "pingHost": "1.1.1.1",
   "disks": [],
   "intervalMs": 1000,
   "networkUnits": "bits",
-  "lhmUrl": "",
+  "lhmUrl": "http://127.0.0.1:8085/data.json",
   "gpuSource": "auto",
   "hotkey": "Ctrl+Alt+R"
 }
