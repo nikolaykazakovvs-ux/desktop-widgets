@@ -28,8 +28,19 @@ namespace LimitsWidget
             if (!condition) throw new Exception(message);
         }
 
+        // LIMITS_TESTS_SKIP — разделы через «;», которые не запускать (например, с принудительным завершением процессов).
+        // LIMITS_TESTS_NO_HARDKILL=1 — пропустить отдельные случаи «зависший CLI», завершаемые принудительно.
+        static readonly bool NoHardKill = Environment.GetEnvironmentVariable("LIMITS_TESTS_NO_HARDKILL") == "1";
+
         static void Section(string name, Action body)
         {
+            string skip = Environment.GetEnvironmentVariable("LIMITS_TESTS_SKIP") ?? "";
+            if (skip.Split(';').Any(x => x.Trim().Length > 0 && name.StartsWith(x.Trim(), StringComparison.Ordinal)))
+            {
+                report.Add("SKIP " + name + " (LIMITS_TESTS_SKIP)");
+                Console.WriteLine(report[report.Count - 1]);
+                return;
+            }
             var sw = Stopwatch.StartNew();
             int before = assertions;
             body();
@@ -487,6 +498,7 @@ namespace LimitsWidget
             };
             foreach (var kv in expect)
             {
+                if (NoHardKill && kv.Key == "hang") continue;
                 Environment.SetEnvironmentVariable("FAKE_CLAUDE_AUTH", kv.Key);
                 var sw = Stopwatch.StartNew();
                 var r = ClaudeAuth.Query(fakeClaude, 2000);
@@ -500,7 +512,7 @@ namespace LimitsWidget
             string log = File.ReadAllText(Path.Combine(Program.BaseDir, "widget.log"));
             foreach (var canary in new[] { "canary.claude", "ORG-CANARY", "ACC-CANARY", "Canary Org", "unknown option" })
                 Check(!log.Contains(canary), "raw auth output never logged: " + canary);
-            Check(log.Contains("claude auth status: код 1") && log.Contains("не ответил вовремя"), "failures logged by code/timeout only");
+            Check(log.Contains("claude auth status: код 1") && (NoHardKill || log.Contains("не ответил вовремя")), "failures logged by code/timeout only");
 
             // кэш: ответ — 30 мин, сбой — 10 мин, другой exe — новый запрос
             var cache = new ClaudeAuth.Cache();
@@ -552,6 +564,93 @@ namespace LimitsWidget
             Check(outSnap.AutoPlan == null && outSnap.Plan == null, "logged-out answer clears automatic plan");
             Environment.SetEnvironmentVariable("FAKE_CLAUDE_AUTH", null);
             Environment.SetEnvironmentVariable("FAKE_CLAUDE_LOG", null);
+            Program.BaseDir = output;
+        }
+
+        // Ревью P1-2: через настоящий Collector (ранняя публикация перезаписывает кэш) прошлая статистика Codex
+        // не теряется при сбое или исчерпании бюджета; её время — исходное, время квот — новое и независимое.
+        static void CodexActivityCollector()
+        {
+            var cfg = new Config();
+            cfg.Order = new List<string> { "codex" };
+            cfg.Svc("codex").Enabled = true;
+            cfg.Svc("codex").Command = fakeCodex;
+            cfg.Svc("codex").TimeoutSeconds = 20;
+            Environment.SetEnvironmentVariable("FAKE_CODEX_LOG", null);
+            var state = new State();
+            var col = new Collector(cfg, state, null, null, new IProvider[] { new CodexProvider() }, null);
+
+            Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", "ok");
+            var first = col.Collect()[0];
+            Check(first.Status == SvcStatus.Ok && first.Activity != null && !first.Activity.Stale && first.Activity.MeasuredAt.HasValue, "poll 1: fresh activity");
+            DateTime t1 = first.Activity.MeasuredAt.Value, q1 = first.DataTime.Value;
+            Thread.Sleep(1100);
+
+            foreach (var mode in new[] { "error", "slow" })
+            {
+                Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", mode);
+                var early = new List<ServiceSnapshot>();
+                var r = col.Collect(s => { lock (early) early.Add(s); })[0];
+                Check(r.Status == SvcStatus.Ok && r.Bars.Count == 2, mode + ": quotas succeed independently");
+                Check(r.DataTime.Value > q1, mode + ": quota time is the new poll's");
+                Check(r.Activity != null && r.Activity.Stale && r.Activity.LifetimeTokens == 123456789, mode + ": previous activity kept and marked stale");
+                Check(Math.Abs((r.Activity.MeasuredAt.Value - t1).TotalSeconds) < 1, mode + ": activity keeps its original timestamp");
+                lock (early) Check(early.Any(e => e.Partial && e.Activity != null), mode + ": early core result does not erase activity");
+                var cached = state.GetCache("codex");
+                Check(cached.Activity != null && cached.Activity.Stale && Math.Abs((cached.Activity.MeasuredAt.Value - t1).TotalSeconds) < 1, mode + ": last-good cache keeps activity with original time");
+            }
+
+            Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", "ok");
+            var fresh = col.Collect()[0];
+            Check(fresh.Activity != null && !fresh.Activity.Stale && fresh.Activity.MeasuredAt.Value > t1, "next success replaces stale activity");
+            Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", null);
+        }
+
+        // Ревью P1-1: Kimi 2.4.1 отвечает на отсутствие/отзыв/неудачное продление входа {kind:error, message} без status.
+        // Вход отличается от сетевого сбоя только по официальному GET /api/v1/auth (managed_provider.status).
+        static void KimiAuthErrors()
+        {
+            string home = NewDir("kimi-home-auth");
+            Environment.SetEnvironmentVariable("KIMI_CODE_HOME", home);
+            File.WriteAllText(Path.Combine(home, "server.token"), "synthetic-auth-token");
+            Program.BaseDir = NewDir("kimi-auth-log");
+            var cases = new[]
+            {
+                new { Name = "no-token", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"No token for managed:kimi-code. Run /login. MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"models_ready\":true,\"managed_provider\":{\"name\":\"managed:kimi-code\",\"status\":\"unauthenticated\"}}}", Login = true },
+                new { Name = "revoked", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"token was rejected; re-login required MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"name\":\"managed:kimi-code\",\"status\":\"revoked\"}}}", Login = true },
+                new { Name = "refresh-failed", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"refresh rejected MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"name\":\"managed:kimi-code\",\"status\":\"expired\"}}}", Login = true },
+                new { Name = "network-authenticated", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"fetch failed MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"name\":\"managed:kimi-code\",\"status\":\"authenticated\"}}}", Login = false },
+                new { Name = "network-auth-unavailable", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"timeout MSG-CANARY\"}}", AuthStatus = 500, Auth = "{}", Login = false },
+                new { Name = "no-managed-provider", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":null}}", Login = false },
+                new { Name = "upstream-503", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"status\":503,\"message\":\"MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"status\":\"unauthenticated\"}}}", Login = false },
+                new { Name = "control-status401", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"status\":401,\"message\":\"MSG-CANARY\"}}", AuthStatus = 500, Auth = "{}", Login = true }
+            };
+            foreach (var c in cases)
+            {
+                var cc = c;
+                using (var srv = new PathServer(path => path.StartsWith("/api/v1/auth") ? new KeyValuePair<int, string>(cc.AuthStatus, cc.Auth)
+                    : path.StartsWith("/api/v1/oauth/usage") ? new KeyValuePair<int, string>(200, cc.Usage) : new KeyValuePair<int, string>(404, "{}")))
+                {
+                    string dir = Path.Combine(home, "server", "instances");
+                    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                    WriteInstance(home, "auth", srv.Port, Process.GetCurrentProcess().Id, NowMs());
+                    var cfg = new Config();
+                    cfg.Svc("kimi").StartServer = false;
+                    var sw = Stopwatch.StartNew();
+                    var s = new KimiProvider(new KimiServerManager()).Collect(Ctx(cfg, "kimi", null).Also(x => x.FixtureOnly = false));
+                    Check(sw.ElapsedMilliseconds < 12000, c.Name + ": finite budget");
+                    if (c.Login)
+                        Check(s.ActionId == KimiProvider.LoginAction && s.Attention && s.StatusText == "нужен вход", c.Name + ": login action");
+                    else
+                        Check(s.ActionId == null && s.StatusText != "нужен вход" && s.Status == SvcStatus.Error, c.Name + ": not misclassified as login (" + s.StatusText + ")");
+                    bool askedAuth;
+                    lock (srv.Paths) askedAuth = srv.Paths.Any(x => x.StartsWith("/api/v1/auth"));
+                    Check(askedAuth == (c.Name != "upstream-503" && c.Name != "control-status401"), c.Name + ": /api/v1/auth consulted only for status-less errors");
+                }
+            }
+            Log.Write("probe line");
+            string log = File.ReadAllText(Path.Combine(Program.BaseDir, "widget.log"));
+            Check(!log.Contains("MSG-CANARY") && !log.Contains("synthetic-auth-token"), "error message and token never logged");
             Program.BaseDir = output;
         }
 
@@ -688,11 +787,14 @@ namespace LimitsWidget
             var withCache = new CodexProvider().Collect(Ctx(cfg, "codex", null).Also(c => { c.FixtureOnly = false; c.State = st; }));
             Check(withCache.Activity != null && withCache.Activity.Stale && withCache.Activity.LifetimeTokens == 123456789, "previous activity kept and marked stale");
 
-            Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", "hang");
-            var sw = Stopwatch.StartNew();
-            var hang = new CodexProvider().Collect(Ctx(cfg, "codex", null).Also(c => c.FixtureOnly = false));
-            Check(hang.Status == SvcStatus.Ok && hang.Activity == null, "hanging activity read bounded");
-            Check(sw.ElapsedMilliseconds < 12000, "activity budget <= 5 s (+ process close): " + sw.ElapsedMilliseconds);
+            if (!NoHardKill)
+            {
+                Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", "hang");
+                var sw = Stopwatch.StartNew();
+                var hang = new CodexProvider().Collect(Ctx(cfg, "codex", null).Also(c => c.FixtureOnly = false));
+                Check(hang.Status == SvcStatus.Ok && hang.Activity == null, "hanging activity read bounded");
+                Check(sw.ElapsedMilliseconds < 12000, "activity budget <= 5 s (+ process close): " + sw.ElapsedMilliseconds);
+            }
 
             Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", "nulls");
             var nulls = new CodexProvider().Collect(Ctx(cfg, "codex", null).Also(c => c.FixtureOnly = false));
@@ -950,9 +1052,11 @@ namespace LimitsWidget
                 Section("Kimi ratio validation", KimiRatios);
                 Section("Kimi empty/revoked token", KimiEmptyToken);
                 Section("Kimi candidate fallback", KimiCandidates);
+                Section("Kimi status-less auth errors via /api/v1/auth (review P1-1)", KimiAuthErrors);
                 Section("Kimi account level (userinfo) and subscription link", KimiLevel);
                 Section("Kimi owned hidden server lifecycle", KimiManagedServer);
                 Section("Codex activity in same app-server", CodexActivity);
+                Section("Codex activity stale fallback through Collector (review P1-2)", CodexActivityCollector);
                 Section("Claude subscriptionType from auth status", ClaudeSubscription);
                 Section("Antigravity credits cache", AgyCreditsCache);
                 Section("config writer and plan priority", ConfigWriterAndPlans);

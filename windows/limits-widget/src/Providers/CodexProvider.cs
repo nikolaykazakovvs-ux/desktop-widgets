@@ -51,8 +51,13 @@ namespace LimitsWidget
 
                 // квоты готовы — в UI и телеметрию сразу; статистика догружается в том же процессе
                 ProviderUtil.MarkFresh(snap, ctx, fixture);
+                // Прошлая статистика берётся из последнего удачного снимка ДО ранней публикации: публикация перезаписывает
+                // этот снимок, и без этого сбой статистики стёр бы её и в карточке, и в кэше. Ранний снимок несёт её как есть
+                // (со своим временем), итоговый — свежую либо её же с пометкой «запрос не удался».
+                var previous = fixture ? null : PreviousActivity(ctx);
+                snap.Activity = previous;
                 ctx.PublishCore(snap);
-                snap.Activity = ReadActivity(ctx, session, fixture, deadline);
+                snap.Activity = ReadActivity(ctx, session, fixture, deadline, previous);
                 return snap;
             }
             finally
@@ -62,7 +67,13 @@ namespace LimitsWidget
         }
 
         // Статистика использования: независимое время, null/отсутствие не превращаются в ноль. Сбой — прошлая статистика с пометкой.
-        static TokenActivity ReadActivity(ProviderContext ctx, AppServer session, bool fixture, DateTime deadline)
+        static TokenActivity PreviousActivity(ProviderContext ctx)
+        {
+            var cached = ctx.State != null ? ctx.State.GetCache("codex") : null;
+            return cached != null ? cached.Activity : null;
+        }
+
+        static TokenActivity ReadActivity(ProviderContext ctx, AppServer session, bool fixture, DateTime deadline, TokenActivity previous)
         {
             TokenActivity fresh = null;
             if (fixture)
@@ -75,7 +86,8 @@ namespace LimitsWidget
             {
                 int left = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
                 int budget = Math.Min(ActivityBudgetMs, left);
-                if (budget > 200)
+                if (budget <= 200) Log.Write("codex account/usage/read: бюджет времени исчерпан квотами");
+                else
                 {
                     string error;
                     // без threadId — статистика всего аккаунта
@@ -85,13 +97,12 @@ namespace LimitsWidget
                 }
             }
             if (fresh != null) return fresh;
-            var cached = ctx.State != null ? ctx.State.GetCache("codex") : null;
-            if (cached != null && cached.Activity != null)
-            {
-                cached.Activity.Stale = true;
-                return cached.Activity;
-            }
-            return null;
+            if (previous == null) return null;
+            // прошлая статистика с исходным временем measuredAt; пометка — только что последний запрос не удался
+            var kept = TokenActivity.FromDict(previous.ToDict());
+            kept.MeasuredAt = previous.MeasuredAt;
+            kept.Stale = true;
+            return kept;
         }
 
         static bool FillLimits(ServiceSnapshot snap, object result, ProviderContext ctx, bool fixture)

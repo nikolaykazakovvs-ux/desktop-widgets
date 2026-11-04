@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 
 // Поддельный `codex app-server` для офлайн-тестов: JSON-RPC построчно по stdio, без сети и аккаунтов.
-// FAKE_CODEX_USAGE: ok | error | hang | nulls | absent. FAKE_CODEX_LOG — файл, куда пишутся полученные запросы.
+// FAKE_CODEX_USAGE: ok | error | hang | slow | nulls | absent. FAKE_CODEX_LOG — файл, куда пишутся полученные запросы.
 static class FakeCodex
 {
     static int Main(string[] args)
@@ -23,6 +23,8 @@ static class FakeCodex
             else if (line.Contains("\"method\":\"account/usage/read\""))
             {
                 if (mode == "hang") { Thread.Sleep(30000); continue; }
+                // ответ позже бюджета статистики (5 с), но процесс сам завершается по закрытию stdin — без принудительного завершения
+                if (mode == "slow") Thread.Sleep(6500);
                 if (mode == "error") { Console.Out.WriteLine("{\"id\":" + id + ",\"error\":{\"code\":-32000,\"message\":\"usage unavailable\"}}"); Console.Out.Flush(); continue; }
                 if (mode == "nulls") { Reply(id, "{\"summary\":{\"lifetimeTokens\":null,\"peakDailyTokens\":null},\"dailyUsageBuckets\":null}"); continue; }
                 string today = DateTime.Now.ToString("yyyy-MM-dd");

@@ -404,10 +404,20 @@ namespace LimitsWidget
                 return false;
             }
             var env = Json.TryParse(body);
-            if (Json.Str(Json.Get(env, "data.kind")) == "error" && Json.Num(Json.Get(env, "data.status")) == 401)
+            if (Json.Str(Json.Get(env, "data.kind")) == "error")
             {
-                probe.Login = true;
-                return false;
+                // status 401 — сервис квот отверг вход. Без status (Kimi Code 2.4.1: нет ключа, ключ отозван, продление
+                // не удалось — и сетевой сбой тоже) различает официальный GET /api/v1/auth: managed_provider.status.
+                // Текст ошибки не разбирается и в журнал не пишется.
+                double? st = Json.Num(Json.Get(env, "data.status"));
+                if (st == 401) { probe.Login = true; return false; }
+                if (!st.HasValue)
+                {
+                    string managed = ManagedStatus(inst, token, Math.Min(AuthCheckMs, timeoutMs));
+                    if (managed == "unauthenticated" || managed == "revoked" || managed == "expired") { probe.Login = true; return false; }
+                    Log.Write("kimi: локальный сервер Kimi Code :" + inst.Port + ": квоты не получены (kind=error), вход: " + (managed ?? "неизвестно"));
+                    return false;
+                }
             }
             string err;
             var q = ParseServer(env, out err);
@@ -425,6 +435,22 @@ namespace LimitsWidget
             probe.Quota = q;
             probe.From = inst;
             return true;
+        }
+
+        const int AuthCheckMs = 3000;
+
+        // managed_provider.status из GET /api/v1/auth: authenticated | expired | revoked | unauthenticated; иное/сбой — null.
+        internal static string ManagedStatus(Instance inst, string token, int timeoutMs)
+        {
+            int status;
+            string body = Get(inst.BaseUrl + "/api/v1/auth", token, Math.Max(500, timeoutMs), false, out status);
+            if (body == null || status != 200) return null;
+            string v = Json.Str(Json.Get(Json.TryParse(body), "data.managed_provider.status"));
+            switch (v)
+            {
+                case "authenticated": case "expired": case "revoked": case "unauthenticated": return v;
+                default: return null;
+            }
         }
 
         // Живые loopback-экземпляры, свежий heartbeat первым; токен уходит только на свою машину.
