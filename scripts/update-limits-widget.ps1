@@ -412,7 +412,78 @@ function Assert-SafeDirectoryPath([string]$RawPath, [string]$ParameterName, [swi
     return $full
 }
 
-function Test-OwnedOrVerifiedLimitsInstall([string]$FullTargetDir) {
+function Get-TargetRollbackProvenance([string]$FullTargetDir, [string]$CustomBackupRoot = $null) {
+    if (-not (Test-Path -LiteralPath $FullTargetDir -PathType Container)) { return $null }
+    Assert-NoReparsePoint -Path $FullTargetDir
+
+    $allowedPostRollbackNames = @('.limits-widget-backups', 'config.json', 'state.json', 'widget.log', 'widget.log.1')
+    $entries = @(Get-ChildItem -LiteralPath $FullTargetDir -Force)
+    if ($entries.Count -eq 0) { return $null }
+
+    foreach ($entry in $entries) {
+        if ($allowedPostRollbackNames -notcontains $entry.Name) {
+            return $null
+        }
+        Assert-NoReparsePointsInTree -RootPath $entry.FullName
+    }
+
+    $cfgCandidate = Join-Path $FullTargetDir 'config.json'
+    if ((Test-Path -LiteralPath $cfgCandidate) -and -not (Test-ValidJsonFile -Path $cfgCandidate)) {
+        return $null
+    }
+    $stateCandidate = Join-Path $FullTargetDir 'state.json'
+    if ((Test-Path -LiteralPath $stateCandidate) -and -not (Test-ValidJsonFile -Path $stateCandidate)) {
+        return $null
+    }
+
+    $candidateBackupRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($CustomBackupRoot)) {
+        try {
+            $safeCustomRoot = Assert-SafeDirectoryPath -RawPath $CustomBackupRoot -ParameterName 'BackupRoot' -AllowExtractDir
+            if (Test-Path -LiteralPath $safeCustomRoot -PathType Container) {
+                $candidateBackupRoots += $safeCustomRoot
+            }
+        } catch {
+        }
+    }
+    $inTargetBackupRoot = Join-Path $FullTargetDir '.limits-widget-backups'
+    if (Test-Path -LiteralPath $inTargetBackupRoot -PathType Container) {
+        $candidateBackupRoots += $inTargetBackupRoot
+    }
+
+    foreach ($bRoot in $candidateBackupRoots) {
+        Assert-NoReparsePointsInTree -RootPath $bRoot
+        $backupDirs = @(Get-ChildItem -LiteralPath $bRoot -Directory -Filter 'backup-*' -Force -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+        foreach ($bDir in $backupDirs) {
+            $bmPath = Join-Path $bDir.FullName 'backup-manifest.json'
+            if (-not (Test-Path -LiteralPath $bmPath -PathType Leaf)) { continue }
+            try {
+                $bm = [IO.File]::ReadAllText($bmPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+                if ($null -eq $bm -or $bm.schemaVersion -ne '1.0' -or [string]::IsNullOrWhiteSpace([string]$bm.targetPath)) {
+                    continue
+                }
+                $bmTarget = [IO.Path]::GetFullPath([string]$bm.targetPath).TrimEnd('\', '/')
+                if (-not [string]::Equals($bmTarget, $FullTargetDir, [StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
+                $missingList = @($bm.missingBeforeUpdate | ForEach-Object { [string]$_ })
+                if (($missingList -contains 'LimitsWidget.exe') -and ($missingList -contains $OwnershipMarkerName)) {
+                    return [pscustomobject]@{
+                        BackupDir          = $bDir.FullName
+                        Manifest           = $bm
+                        SeededConfigSha256 = if ($bm.PSObject.Properties['seededConfigSha256'] -and -not [string]::IsNullOrWhiteSpace([string]$bm.seededConfigSha256)) { ([string]$bm.seededConfigSha256).ToLowerInvariant() } else { $null }
+                    }
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+
+    return $null
+}
+
+function Test-OwnedOrVerifiedLimitsInstall([string]$FullTargetDir, [string]$CustomBackupRoot = $null) {
     $markerPath = Join-Path $FullTargetDir $OwnershipMarkerName
     if (Test-Path -LiteralPath $markerPath -PathType Leaf) {
         Assert-NoReparsePoint -Path $markerPath
@@ -429,14 +500,17 @@ function Test-OwnedOrVerifiedLimitsInstall([string]$FullTargetDir) {
             return $false
         }
     }
+    if ($null -ne (Get-TargetRollbackProvenance -FullTargetDir $FullTargetDir -CustomBackupRoot $CustomBackupRoot)) {
+        return $true
+    }
     return $false
 }
 
-function Assert-TargetInstallationDirectory([string]$FullTargetDir) {
+function Assert-TargetInstallationDirectory([string]$FullTargetDir, [string]$CustomBackupRoot = $null) {
     if (-not (Test-Path -LiteralPath $FullTargetDir)) { return }
     $entries = @(Get-ChildItem -LiteralPath $FullTargetDir -Force)
     if ($entries.Count -eq 0) { return }
-    if (-not (Test-OwnedOrVerifiedLimitsInstall -FullTargetDir $FullTargetDir)) {
+    if (-not (Test-OwnedOrVerifiedLimitsInstall -FullTargetDir $FullTargetDir -CustomBackupRoot $CustomBackupRoot)) {
         throw "Target directory '$FullTargetDir' is non-empty and is not a verified LimitsWidget installation."
     }
     foreach ($name in ($AllowedPackageFiles + $KnownLegacyItems + @('package-manifest.json', $OwnershipMarkerName, 'state.json', 'widget.log', 'widget.log.1', '.limits-widget-backups', '.limits-widget-legacy'))) {
@@ -738,7 +812,7 @@ function Stop-OwnedTargetProcessesGracefully([string]$FullTargetDir, [int]$Timeo
     return $initialState
 }
 
-function New-TargetBackup([string]$FullTargetDir, [string]$CustomBackupRoot) {
+function New-TargetBackup([string]$FullTargetDir, [string]$CustomBackupRoot, [string]$SeededConfigSha256 = $null) {
     $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $baseBackupRoot = if ([string]::IsNullOrWhiteSpace($CustomBackupRoot)) {
         Join-Path $FullTargetDir '.limits-widget-backups'
@@ -815,6 +889,7 @@ function New-TargetBackup([string]$FullTargetDir, [string]$CustomBackupRoot) {
         createdAtUtc        = [DateTime]::UtcNow.ToString('o')
         targetPath          = $FullTargetDir
         legacyArchiveFolder = $null
+        seededConfigSha256  = $SeededConfigSha256
         backedUpFiles       = $backedUpFiles
         missingBeforeUpdate = $missingBeforeUpdate
         backedUpLegacy      = $backedUpLegacy
@@ -883,10 +958,27 @@ function Restore-FromBackup([string]$FullTargetDir, [string]$BackupDir, [int]$Ti
         }
     }
 
-    # Remove application files that did not exist before the update, but never delete user config/state/logs
+    $seededCfgHash = if ($bm.PSObject.Properties['seededConfigSha256'] -and -not [string]::IsNullOrWhiteSpace([string]$bm.seededConfigSha256)) {
+        ([string]$bm.seededConfigSha256).ToLowerInvariant()
+    } else {
+        $null
+    }
+
+    # Remove application files that did not exist before the update, but never delete user-authored config/state/logs.
+    # If config.json was newly seeded by the updater during a first install and remains byte-for-byte unchanged,
+    # remove the unchanged seed so a failed pristine first install rolls back cleanly without losing user edits.
     foreach ($added in @($bm.missingBeforeUpdate)) {
         $addedRel = [string]$added
         if ($UserRuntimePreserveFiles -contains $addedRel) {
+            if ($addedRel -eq 'config.json' -and $null -ne $seededCfgHash) {
+                $seededCfgPath = Join-Path $FullTargetDir 'config.json'
+                if (Test-Path -LiteralPath $seededCfgPath -PathType Leaf) {
+                    Assert-NoReparsePoint -Path $seededCfgPath
+                    if ((Get-LowerSha256 -Path $seededCfgPath) -eq $seededCfgHash) {
+                        Remove-ContainedPath -ParentDir $FullTargetDir -ChildPath $seededCfgPath
+                    }
+                }
+            }
             continue
         }
         $addedPath = Join-Path $FullTargetDir $addedRel
@@ -993,7 +1085,7 @@ try {
 
     # Mode 2 & 3 require a concrete TargetPath
     $fullTarget = Assert-SafeDirectoryPath -RawPath $TargetPath -ParameterName 'TargetPath'
-    Assert-TargetInstallationDirectory -FullTargetDir $fullTarget
+    Assert-TargetInstallationDirectory -FullTargetDir $fullTarget -CustomBackupRoot $BackupRoot
 
     # Mode 2: Explicit Rollback (-RollbackFromBackup)
     if (-not [string]::IsNullOrWhiteSpace($RollbackFromBackup)) {
@@ -1115,12 +1207,23 @@ try {
         New-Item -ItemType Directory -Path $fullTarget -Force | Out-Null
     }
 
-    $configExists = Test-Path -LiteralPath (Join-Path $fullTarget 'config.json') -PathType Leaf
-    $stateExists = Test-Path -LiteralPath (Join-Path $fullTarget 'state.json') -PathType Leaf
-    $preConfigHash = if ($configExists) { Get-LowerSha256 -Path (Join-Path $fullTarget 'config.json') } else { $null }
-    $preStateHash = if ($stateExists) { Get-LowerSha256 -Path (Join-Path $fullTarget 'state.json') } else { $null }
+    $packagedConfigSha256 = Get-LowerSha256 -Path (Join-Path $validated.PackageRoot 'config.json')
+    $rollbackProvenance = Get-TargetRollbackProvenance -FullTargetDir $fullTarget -CustomBackupRoot $BackupRoot
+    $targetCfgCandidate = Join-Path $fullTarget 'config.json'
+    if ($null -ne $rollbackProvenance -and (Test-Path -LiteralPath $targetCfgCandidate -PathType Leaf)) {
+        $existingCfgSha = Get-LowerSha256 -Path $targetCfgCandidate
+        if ($existingCfgSha -eq $packagedConfigSha256 -or ($null -ne $rollbackProvenance.SeededConfigSha256 -and $existingCfgSha -eq $rollbackProvenance.SeededConfigSha256)) {
+            Remove-ContainedPath -ParentDir $fullTarget -ChildPath $targetCfgCandidate
+        }
+    }
 
-    $backupInfo = New-TargetBackup -FullTargetDir $fullTarget -CustomBackupRoot $BackupRoot
+    $configExists = Test-Path -LiteralPath $targetCfgCandidate -PathType Leaf
+    $stateExists = Test-Path -LiteralPath (Join-Path $fullTarget 'state.json') -PathType Leaf
+    $preConfigHash = if ($configExists) { Get-LowerSha256 -Path $targetCfgCandidate } else { $null }
+    $preStateHash = if ($stateExists) { Get-LowerSha256 -Path (Join-Path $fullTarget 'state.json') } else { $null }
+    $seededConfigHashForBackup = if (-not $configExists) { $packagedConfigSha256 } else { $null }
+
+    $backupInfo = New-TargetBackup -FullTargetDir $fullTarget -CustomBackupRoot $BackupRoot -SeededConfigSha256 $seededConfigHashForBackup
 
     $archivedLegacyDir = $null
     try {

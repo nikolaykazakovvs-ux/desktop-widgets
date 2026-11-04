@@ -61,9 +61,11 @@ if ($Scope -eq 'Limits') {
 
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 foreach ($archive in Get-ChildItem -LiteralPath $artifacts -Filter '*.zip') {
+    $folder = if ($archive.Name.StartsWith('ResourcesWidget-')) { 'resources-widget' } else { 'limits-widget' }
+    $extractSubDir = Join-Path $results $folder
+    New-Item -ItemType Directory -Path $extractSubDir -Force | Out-Null
     $zip = [IO.Compression.ZipFile]::OpenRead($archive.FullName)
     try {
-        $folder = if ($archive.Name.StartsWith('ResourcesWidget-')) { 'resources-widget' } else { 'limits-widget' }
         $exe = if ($folder -eq 'resources-widget') { 'ResourcesWidget.exe' } else { 'LimitsWidget.exe' }
         $allowed = @("$folder/$exe", "$folder/config.json", "$folder/config.example.json", "$folder/LICENSE", "$folder/START-HERE.txt")
         if ($folder -eq 'resources-widget') {
@@ -73,7 +75,9 @@ foreach ($archive in Get-ChildItem -LiteralPath $artifacts -Filter '*.zip') {
         }
         $fileNames = @()
         foreach ($entry in $zip.Entries) {
-            $norm = $entry.FullName.Replace('\', '/')
+            $rawFullName = [string]$entry.FullName
+            Assert (-not $rawFullName.Contains('\')) "Archive $($archive.Name) entry must use forward-slash separator ('/'), got: $rawFullName"
+            $norm = $rawFullName.Replace('\', '/')
             Assert (-not $norm.Contains('..') -and -not $norm.Contains(':') -and -not $norm.StartsWith('/')) "Unsafe archive entry: $norm"
             if ($norm.EndsWith('/')) {
                 Assert ($norm -eq "$folder/") "Unexpected directory entry in archive $($archive.Name): $norm"
@@ -83,8 +87,12 @@ foreach ($archive in Get-ChildItem -LiteralPath $artifacts -Filter '*.zip') {
         }
         Assert ($fileNames.Count -eq $allowed.Count) "Unexpected file count in portable archive $($archive.Name): got $($fileNames.Count), expected $($allowed.Count)."
         foreach ($name in $fileNames) { Assert ($allowed -contains $name) "Unexpected archive file: $name" }
+        foreach ($entry in $zip.Entries) {
+            if ($entry.FullName.EndsWith('/')) { continue }
+            $leaf = [IO.Path]::GetFileName($entry.FullName)
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $extractSubDir $leaf), $true)
+        }
     } finally { $zip.Dispose() }
-    Expand-Archive -LiteralPath $archive.FullName -DestinationPath $results
 }
 
 $fw = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319'
@@ -210,38 +218,46 @@ if ($testLimits) {
     $scratch = Join-Path $results 'limits-updater-scratch'
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 
-    function Invoke-UpdaterExpectFail([hashtable]$BoundParams, [string]$Reason) {
+    function Invoke-UpdaterExpectFail([hashtable]$BoundParams, [string]$Reason, [Parameter(Mandatory=$true)][string]$ExpectedMatch) {
         $failed = $false
+        $errText = ''
         try {
             & $updaterScript @BoundParams | Out-Null
             if ($LASTEXITCODE -ne 0) { $failed = $true }
         } catch {
             $failed = $true
+            $errText = [string]$_.Exception.Message
         }
         Assert $failed "Expected updater rejection for: $Reason"
+        Assert ($errText -match $ExpectedMatch) "Updater rejection for '$Reason' had unexpected error message: '$errText' (expected pattern: '$ExpectedMatch')"
     }
 
     # 4a. Path, root, UNC, reserved folder, git checkout, and unowned populated directory rejection
     $volRoot = [IO.Path]::GetPathRoot($scratch)
-    Invoke-UpdaterExpectFail @{ TargetPath = $volRoot; PackagePath = $limitsZip; DryRun = $true } 'volume root'
-    Invoke-UpdaterExpectFail @{ TargetPath = ($volRoot.Substring(0, 2) + 'relative'); PackagePath = $limitsZip; DryRun = $true } 'drive-relative path'
-    Invoke-UpdaterExpectFail @{ TargetPath = 'relative-folder'; PackagePath = $limitsZip; DryRun = $true } 'relative path'
-    Invoke-UpdaterExpectFail @{ TargetPath = '\\localhost\share\limits-widget'; PackagePath = $limitsZip; DryRun = $true } 'UNC path'
-    Invoke-UpdaterExpectFail @{ TargetPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile); PackagePath = $limitsZip; DryRun = $true } 'UserProfile root'
-    Invoke-UpdaterExpectFail @{ TargetPath = (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Downloads'); PackagePath = $limitsZip; DryRun = $true } 'Downloads root'
-    Invoke-UpdaterExpectFail @{ TargetPath = [IO.Path]::GetTempPath(); PackagePath = $limitsZip; DryRun = $true } 'Temp root'
+    Invoke-UpdaterExpectFail @{ TargetPath = $volRoot; PackagePath = $limitsZip; DryRun = $true } 'volume root' 'Volume root .* is not allowed'
+    Invoke-UpdaterExpectFail @{ TargetPath = ($volRoot.Substring(0, 2) + 'relative'); PackagePath = $limitsZip; DryRun = $true } 'drive-relative path' 'Drive-relative paths are not allowed'
+    Invoke-UpdaterExpectFail @{ TargetPath = 'relative-folder'; PackagePath = $limitsZip; DryRun = $true } 'relative path' 'Relative paths are not allowed'
+    Invoke-UpdaterExpectFail @{ TargetPath = '\\localhost\share\limits-widget'; PackagePath = $limitsZip; DryRun = $true } 'UNC path' 'UNC/network paths are not allowed'
+    Invoke-UpdaterExpectFail @{ TargetPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile); PackagePath = $limitsZip; DryRun = $true } 'UserProfile root' 'System or user root folder .* cannot be used'
+    Invoke-UpdaterExpectFail @{ TargetPath = (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Downloads'); PackagePath = $limitsZip; DryRun = $true } 'Downloads root' 'Downloads folder .* cannot be used'
+    Invoke-UpdaterExpectFail @{ TargetPath = [IO.Path]::GetTempPath(); PackagePath = $limitsZip; DryRun = $true } 'Temp root' 'Temp root folder .* cannot be used'
 
     $fakeGitCheckout = Join-Path $scratch 'fake-git-checkout'
     New-Item -ItemType Directory -Path (Join-Path $fakeGitCheckout '.git') -Force | Out-Null
-    Invoke-UpdaterExpectFail @{ TargetPath = $fakeGitCheckout; PackagePath = $limitsZip } 'git checkout directory'
+    Invoke-UpdaterExpectFail @{ TargetPath = $fakeGitCheckout; PackagePath = $limitsZip } 'git checkout directory' 'Git repository checkout .* cannot be used'
 
     $unownedShared = Join-Path $scratch 'unowned-shared'
     New-Item -ItemType Directory -Path $unownedShared -Force | Out-Null
     $sentinelFile = Join-Path $unownedShared 'important-user-file.txt'
     [IO.File]::WriteAllText($sentinelFile, 'KEEP_SENTINEL', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $unownedShared 'LimitsWidget.exe'), 'not-a-valid-pe-binary', [Text.UTF8Encoding]::new($false))
-    Invoke-UpdaterExpectFail @{ TargetPath = $unownedShared; PackagePath = $limitsZip } 'populated unowned directory'
+    Invoke-UpdaterExpectFail @{ TargetPath = $unownedShared; PackagePath = $limitsZip } 'populated unowned directory' 'is non-empty and is not a verified LimitsWidget installation'
     Assert ([IO.File]::ReadAllText($sentinelFile) -eq 'KEEP_SENTINEL') 'Unowned directory sentinel was modified.'
+
+    $unownedConfigOnly = Join-Path $scratch 'unowned-config-only'
+    New-Item -ItemType Directory -Path $unownedConfigOnly -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $unownedConfigOnly 'config.json'), '{"otherApp":true}', [Text.UTF8Encoding]::new($false))
+    Invoke-UpdaterExpectFail @{ TargetPath = $unownedConfigOnly; PackagePath = $limitsZip } 'unowned directory with config.json only' 'is non-empty and is not a verified LimitsWidget installation'
 
     # 4b. NTFS junction / reparse point containment guards
     $outsideDir = Join-Path $scratch 'junction-outside-target'
@@ -251,15 +267,15 @@ if ($testLimits) {
     $junctionDir = Join-Path $scratch 'junction-install'
     & $updaterHelperExe '--create-junction' $junctionDir $outsideDir
     Assert ($LASTEXITCODE -eq 0) 'Failed to create scratch junction fixture.'
-    Invoke-UpdaterExpectFail @{ TargetPath = $junctionDir; PackagePath = $limitsZip } 'junction target directory'
-    Invoke-UpdaterExpectFail @{ TargetPath = (Join-Path $junctionDir 'nested'); PackagePath = $limitsZip } 'junction ancestor directory'
+    Invoke-UpdaterExpectFail @{ TargetPath = $junctionDir; PackagePath = $limitsZip } 'junction target directory' 'Reparse point.*rejected'
+    Invoke-UpdaterExpectFail @{ TargetPath = (Join-Path $junctionDir 'nested'); PackagePath = $limitsZip } 'junction ancestor directory' 'Reparse point rejected in ancestor path'
 
     $childJunctionInstall = Join-Path $scratch 'child-junction-install'
     New-Item -ItemType Directory -Path $childJunctionInstall -Force | Out-Null
     Copy-Item -LiteralPath $updaterHelperExe -Destination (Join-Path $childJunctionInstall 'LimitsWidget.exe') -Force
     & $updaterHelperExe '--create-junction' (Join-Path $childJunctionInstall 'src') $outsideDir
     Assert ($LASTEXITCODE -eq 0) 'Failed to create child src junction fixture.'
-    Invoke-UpdaterExpectFail @{ TargetPath = $childJunctionInstall; PackagePath = $limitsZip } 'junction inside legacy child src'
+    Invoke-UpdaterExpectFail @{ TargetPath = $childJunctionInstall; PackagePath = $limitsZip } 'junction inside legacy child src' 'Reparse point.*rejected'
     Assert ([IO.File]::ReadAllText($outsideSentinel) -eq 'OUTSIDE_SAFE') 'Outside junction sentinel was modified.'
 
     # 4c. Package manifest / hash tamper, missing SHA256SUMS, and zip directory-entry traversal rejection before mutation
@@ -268,7 +284,12 @@ if ($testLimits) {
         TargetPath            = $cleanTarget
         PackagePath           = $limitsZip
         ExpectedPackageSha256 = ('0' * 64)
-    } 'mismatched ExpectedPackageSha256'
+    } 'mismatched ExpectedPackageSha256' 'Package archive SHA-256 mismatch'
+    Invoke-UpdaterExpectFail @{
+        TargetPath            = $cleanTarget
+        PackagePath           = $limitsZip
+        ExpectedPackageSha256 = 'not-a-valid-sha256'
+    } 'malformed ExpectedPackageSha256' 'Invalid -ExpectedPackageSha256 value'
     Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Tampered archive hash check created target directory.'
 
     # Unauthenticated zip without SHA256SUMS.txt or -ExpectedPackageSha256 must be rejected
@@ -279,7 +300,7 @@ if ($testLimits) {
     Invoke-UpdaterExpectFail @{
         TargetPath  = $cleanTarget
         PackagePath = $unauthZip
-    } 'zip archive without ExpectedPackageSha256 or adjacent SHA256SUMS.txt'
+    } 'zip archive without ExpectedPackageSha256 or adjacent SHA256SUMS.txt' 'Package archive authenticity cannot be verified'
     Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Unauthenticated zip check mutated target directory.'
 
     # Zip with adjacent SHA256SUMS.txt that does not list the zip must be rejected
@@ -287,8 +308,13 @@ if ($testLimits) {
     Invoke-UpdaterExpectFail @{
         TargetPath  = $cleanTarget
         PackagePath = $unauthZip
-    } 'zip archive missing from adjacent SHA256SUMS.txt'
-    Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Missing entry in SHA256SUMS.txt mutated target directory.'
+    } 'zip archive missing from adjacent SHA256SUMS.txt' 'is not listed in adjacent SHA256SUMS\.txt'
+    [IO.File]::WriteAllText((Join-Path $noSumsDir 'SHA256SUMS.txt'), (('0' * 64) + "  LimitsWidget-1.1.0-win-x64.zip`n"), [Text.UTF8Encoding]::new($false))
+    Invoke-UpdaterExpectFail @{
+        TargetPath  = $cleanTarget
+        PackagePath = $unauthZip
+    } 'zip archive with wrong hash in adjacent SHA256SUMS.txt' 'Package archive SHA-256 mismatch against adjacent SHA256SUMS\.txt'
+    Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Missing or mismatched entry in SHA256SUMS.txt mutated target directory.'
 
     # Zip containing directory-traversal entry (../../../s4-escape/) must be rejected before extraction
     $traversalZipDir = Join-Path $scratch 'traversal-zip-dir'
@@ -308,7 +334,7 @@ if ($testLimits) {
         PackagePath           = $traversalZip
         ExpectedPackageSha256 = $traversalZipHash
         DryRun                = $true
-    } 'zip archive with directory-traversal entry'
+    } 'zip archive with directory-traversal entry' 'Unsafe path traversal or rooted entry in package archive'
     Assert (@(Get-ChildItem -LiteralPath $results -Recurse -Directory -Filter 's4-escape*' -ErrorAction SilentlyContinue).Count -eq 0) 'Directory traversal entry escaped during validation.'
 
     $tamperedPkgDir = Join-Path $scratch 'tampered-package-dir'
@@ -317,7 +343,7 @@ if ($testLimits) {
     Invoke-UpdaterExpectFail @{
         TargetPath  = $cleanTarget
         PackagePath = $tamperedPkgDir
-    } 'tampered file hash in package'
+    } 'tampered file hash in package' "(Size|SHA-256) mismatch for 'LICENSE'"
     Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Tampered file check mutated target directory.'
 
     $extraFilePkgDir = Join-Path $scratch 'extra-file-package-dir'
@@ -326,7 +352,7 @@ if ($testLimits) {
     Invoke-UpdaterExpectFail @{
         TargetPath  = $cleanTarget
         PackagePath = $extraFilePkgDir
-    } 'unallowlisted extra file in package'
+    } 'unallowlisted extra file in package' 'expected exact allowlist|Unallowlisted file'
 
     # 4d. Isolated extraction mode (-ExtractTo) and non-empty directory refusal
     $extractOnlyDir = Join-Path $scratch 'isolated-extract'
@@ -335,7 +361,7 @@ if ($testLimits) {
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $extractReceiptPath)) 'Isolated -ExtractTo failed.'
     $extractReceipt = Get-Content -LiteralPath $extractReceiptPath -Raw | ConvertFrom-Json
     Assert ($extractReceipt.mode -eq 'extract-only' -and $extractReceipt.status -eq 'EXTRACTED_ONLY' -and $extractReceipt.acceptance -eq $false -and $extractReceipt.mutatedTarget -eq $false) 'Extract receipt flags invalid.'
-    Invoke-UpdaterExpectFail @{ PackagePath = $limitsZip; ExtractTo = $extractOnlyDir } 'extract into existing non-empty directory'
+    Invoke-UpdaterExpectFail @{ PackagePath = $limitsZip; ExtractTo = $extractOnlyDir } 'extract into existing non-empty directory' 'already exists and is not empty'
 
     # 4e. Simulated legacy installation fixture (with legacy src/build.ps1, unknown config/state fields, and user files)
     $legacyInstall = Join-Path $scratch 'legacy-install'
@@ -420,7 +446,7 @@ if ($testLimits) {
             PackagePath   = $limitsZip
             InjectFailure = $stage
             ReceiptPath   = $failReceiptPath
-        } "failure injection $stage"
+        } "failure injection $stage" "Update failed and was cleanly rolled back.*Simulated failure injection: $stage"
         $failReceipt = Get-Content -LiteralPath $failReceiptPath -Raw | ConvertFrom-Json
         Assert ($failReceipt.status -eq 'ROLLED_BACK_ON_FAILURE' -and $failReceipt.mutatedTarget -eq $false) "Rollback receipt not written for $stage."
         Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $oldExeHash) "Rollback failed to restore LimitsWidget.exe after $stage."
@@ -447,7 +473,7 @@ if ($testLimits) {
             PackagePath                = $limitsZip
             GracefulStopTimeoutSeconds = 1
             ReceiptPath                = $abortReceiptPath
-        } 'target process refusing graceful exit'
+        } 'target process refusing graceful exit' 'Graceful shutdown could not be confirmed.*Force termination is disabled by policy'
         $abortReceipt = Get-Content -LiteralPath $abortReceiptPath -Raw | ConvertFrom-Json
         Assert ($abortReceipt.status -eq 'ABORTED_PROCESS_STILL_RUNNING' -and $abortReceipt.mutatedTarget -eq $false) 'Abort-before-mutation receipt invalid.'
         Assert (-not $stubbornProc.HasExited) 'Updater force-killed a target process that ignored graceful close!'
@@ -555,7 +581,7 @@ if ($testLimits) {
     Invoke-UpdaterExpectFail @{
         TargetPath         = $otherTarget
         RollbackFromBackup = $updateReceipt.backupPath
-    } 'cross-target backup rollback'
+    } 'cross-target backup rollback' 'Cross-target rollback rejected'
     Assert ((Get-Content -LiteralPath (Join-Path $otherTarget 'config.json') -Raw).Contains('OTHER_TARGET')) 'Cross-target rollback modified other target config.json.'
 
     # Simulate user editing config.json and widget updating state.json after the 1.1.0 update, then rolling back
@@ -573,6 +599,48 @@ if ($testLimits) {
     foreach ($legacyName in @('src/legacy-item.txt', 'assets/legacy-item.txt', 'tools/legacy-item.txt', 'fixtures/legacy-item.txt', 'build.ps1', 'app.manifest', 'README.md', $userNoteName, 'widget.log')) {
         Assert (Test-Path -LiteralPath (Join-Path $legacyInstall $legacyName)) "Explicit rollback did not restore '$legacyName'."
     }
+
+    # 4k. Pristine first-install failure + automatic rollback + retry regression (and user-edited config preservation vs unrelated file rejection)
+    $freshFailTarget = Join-Path $scratch 'fresh-fail'
+    $freshFailReceiptPath = Join-Path $scratch 'fresh-fail-receipt.json'
+    Invoke-UpdaterExpectFail @{
+        TargetPath    = $freshFailTarget
+        PackagePath   = $limitsZip
+        InjectFailure = 'AfterFileUpdateValidation'
+        ReceiptPath   = $freshFailReceiptPath
+    } 'pristine first-install failure injection AfterFileUpdateValidation' 'Update failed and was cleanly rolled back.*Simulated failure injection: AfterFileUpdateValidation'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $freshFailTarget 'LimitsWidget.exe'))) 'Failed first install left LimitsWidget.exe behind.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $freshFailTarget '.limits-widget-install'))) 'Failed first install left ownership marker behind.'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $freshFailTarget 'config.json'))) 'Failed first install left unchanged seeded config.json behind.'
+    Assert (Test-Path -LiteralPath (Join-Path $freshFailTarget '.limits-widget-backups') -PathType Container) 'Failed first install deleted valuable backup directory.'
+
+    # Verify unrelated file injected into rolled-back fresh target is still rejected
+    $unrelatedSpoof = Join-Path $freshFailTarget 'unrelated-foreign.txt'
+    [IO.File]::WriteAllText($unrelatedSpoof, 'FOREIGN', [Text.UTF8Encoding]::new($false))
+    Invoke-UpdaterExpectFail @{
+        TargetPath  = $freshFailTarget
+        PackagePath = $limitsZip
+    } 'rolled-back fresh target polluted with unrelated file' 'is non-empty and is not a verified LimitsWidget installation'
+    Remove-Item -LiteralPath $unrelatedSpoof -Force
+
+    # Verify retry succeeds cleanly on the rolled-back fresh target while keeping previous backup
+    $freshRetryReceiptPath = Join-Path $scratch 'fresh-retry-receipt.json'
+    & $updaterScript -TargetPath $freshFailTarget -PackagePath $limitsZip -ReceiptPath $freshRetryReceiptPath | Out-Null
+    Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $freshRetryReceiptPath)) 'Retry after failed pristine first install failed.'
+    Assert ((Get-LowerSha256 (Join-Path $freshFailTarget 'LimitsWidget.exe')) -eq $packagedExeHash) 'Retried first install did not install LimitsWidget.exe.'
+    Assert (Test-Path -LiteralPath (Join-Path $freshFailTarget 'config.json') -PathType Leaf) 'Retried first install did not seed config.json.'
+    Assert (@(Get-ChildItem -LiteralPath (Join-Path $freshFailTarget '.limits-widget-backups') -Directory -Filter 'backup-*').Count -ge 2) 'Retried first install did not preserve prior backup.'
+
+    # Verify user edits to config.json on a fresh install are preserved across explicit rollback and subsequent retry
+    $userEditedFreshCfg = $cfgRaw.Replace('"refreshSeconds": 300', '"refreshSeconds": 120')
+    [IO.File]::WriteAllText((Join-Path $freshFailTarget 'config.json'), $userEditedFreshCfg, [Text.UTF8Encoding]::new($false))
+    $userEditedFreshCfgHash = Get-LowerSha256 (Join-Path $freshFailTarget 'config.json')
+    & $updaterScript -TargetPath $freshFailTarget -RollbackFromBackup 'latest' | Out-Null
+    Assert ($LASTEXITCODE -eq 0) 'Rollback of fresh install after user config edit failed.'
+    Assert ((Get-LowerSha256 (Join-Path $freshFailTarget 'config.json')) -eq $userEditedFreshCfgHash) 'Rollback of fresh install deleted user-edited config.json.'
+    & $updaterScript -TargetPath $freshFailTarget -PackagePath $limitsZip | Out-Null
+    Assert ($LASTEXITCODE -eq 0) 'Re-install after fresh rollback with user-edited config.json failed.'
+    Assert ((Get-LowerSha256 (Join-Path $freshFailTarget 'config.json')) -eq $userEditedFreshCfgHash) 'Re-install after fresh rollback clobbered user-edited config.json.'
 
     $limitsValidationSummary = [ordered]@{
         scope                         = $Scope

@@ -14,6 +14,31 @@ if ($LimitsOnly) { $Scope = 'Limits' }
 $buildResources = ($Scope -eq 'All' -or $Scope -eq 'Resources')
 $buildLimits = ($Scope -eq 'All' -or $Scope -eq 'Limits')
 
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+
+function New-StandardZipArchive([string]$SourceDirectory, [string]$RootFolderName, [string]$DestinationZipPath) {
+    if (Test-Path -LiteralPath $DestinationZipPath) {
+        Remove-Item -LiteralPath $DestinationZipPath -Force
+    }
+    $fullSource = [IO.Path]::GetFullPath($SourceDirectory).TrimEnd('\', '/')
+    $zip = [IO.Compression.ZipFile]::Open($DestinationZipPath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $files = @(Get-ChildItem -LiteralPath $fullSource -File -Force -Recurse | Sort-Object FullName)
+        foreach ($file in $files) {
+            $relPath = $file.FullName.Substring($fullSource.Length + 1).Replace('\', '/')
+            $entryName = "$RootFolderName/$relPath"
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip,
+                $file.FullName,
+                $entryName,
+                [IO.Compression.CompressionLevel]::Optimal
+            )
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) {
@@ -162,7 +187,7 @@ try {
             [IO.File]::WriteAllText((Join-Path $target 'package-manifest.json'), $manifestJson, [Text.UTF8Encoding]::new($false))
         }
 
-        Compress-Archive -LiteralPath $target -DestinationPath (Join-Path $output $widget.Archive) -CompressionLevel Optimal
+        New-StandardZipArchive -SourceDirectory $target -RootFolderName $widget.Folder -DestinationZipPath (Join-Path $output $widget.Archive)
     }
 
     if ($buildResources) {
