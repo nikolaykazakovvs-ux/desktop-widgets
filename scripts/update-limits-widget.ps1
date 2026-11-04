@@ -1,13 +1,19 @@
 <#
   Reversible package-manifest updater for AI Limits (LimitsWidget).
   - Requires a concrete local target installation path (or explicit -ExtractTo directory).
-  - Validates package-manifest.json and all file SHA-256 hashes before any target mutation.
-  - Owns and stops only processes whose executable path exactly matches <TargetPath>\LimitsWidget.exe
-    and their descendant child tree; never touches foreign LimitsWidget or provider processes.
-  - Preserves existing config.json and state.json (including all unknown fields) and unknown user files.
-  - Creates a full pre-update backup snapshot and safely archives known legacy source/build items
-    (src, assets, tools, fixtures, build.ps1, app.manifest, README.md) under .limits-widget-legacy\
-    rather than destroying them.
+  - Validates archive authenticity (-ExpectedPackageSha256 or matching entry in adjacent SHA256SUMS.txt),
+    package-manifest.json, and all file SHA-256 hashes before any extraction or target mutation.
+  - Requests graceful-only application shutdown for processes whose executable path strictly matches
+    <TargetPath>\LimitsWidget.exe (verified by PID, ExecutablePath, and CreationDate). Never touches
+    foreign LimitsWidget instances or external/child user applications (browsers, editors, CLIs), and
+    never falls back to forced process termination. Aborts before target mutation if graceful exit
+    cannot be confirmed within -GracefulStopTimeoutSeconds.
+  - Stops the target application before hashing/backing up config.json and state.json so shutdown
+    state saves complete cleanly without races.
+  - Preserves existing config.json and state.json (including all unknown fields and post-update edits
+    during rollback) and unknown user files.
+  - Safely archives known legacy source/build items (src, assets, tools, fixtures, build.ps1,
+    app.manifest, README.md) under .limits-widget-legacy\ rather than destroying them.
   - Verifies strict absolute path containment and absence of reparse points before any recursive move/delete.
   - Supports -DryRun, -ExtractTo, -InjectFailure (automatic rollback verification), and -RollbackFromBackup.
 #>
@@ -21,6 +27,8 @@ param(
     [string]$ExtractTo,
     [switch]$DryRun,
     [switch]$RestartWidget,
+    [ValidateRange(1, 120)]
+    [int]$GracefulStopTimeoutSeconds = 10,
     [ValidateSet('None', 'AfterStopBeforeMutate', 'AfterArchiveLegacy', 'MidFileUpdate', 'AfterFileUpdateValidation')]
     [string]$InjectFailure = 'None',
     [string]$ReceiptPath
@@ -28,6 +36,129 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+
+if (-not ('LimitsWidgetUpdaterNative' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public static class LimitsWidgetUpdaterNative
+{
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextW(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    private const uint WM_CLOSE = 0x0010;
+
+    public static int RequestGracefulWindowClose(int targetPid, bool allowGlobalExitEvent)
+    {
+        int posted = 0;
+        var targetWindows = new List<IntPtr>();
+        var fallbackWindows = new List<IntPtr>();
+
+        EnumWindows((hWnd, lParam) =>
+        {
+            uint winPid;
+            GetWindowThreadProcessId(hWnd, out winPid);
+            if ((int)winPid != targetPid) return true;
+
+            var clsSb = new StringBuilder(256);
+            GetClassNameW(hWnd, clsSb, clsSb.Capacity);
+            string cls = clsSb.ToString();
+
+            var titleSb = new StringBuilder(256);
+            GetWindowTextW(hWnd, titleSb, titleSb.Capacity);
+            string title = titleSb.ToString();
+
+            // Primary WPF WidgetWindow / SubscriptionsDialog / graceful test fixture window handles
+            if (cls.StartsWith("HwndWrapper[", StringComparison.OrdinalIgnoreCase) ||
+                cls.StartsWith("LimitsWidget", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(title, "\u041B\u0438\u043C\u0438\u0442\u044B \u043D\u0435\u0439\u0440\u043E\u0441\u0435\u0442\u0435\u0439", StringComparison.Ordinal) ||
+                string.Equals(title, "LimitsWidget", StringComparison.OrdinalIgnoreCase))
+            {
+                targetWindows.Add(hWnd);
+            }
+            else if (!cls.StartsWith("GDI+ Hook", StringComparison.OrdinalIgnoreCase) &&
+                     !cls.StartsWith(".NET-BroadcastEventWindow", StringComparison.OrdinalIgnoreCase) &&
+                     !cls.StartsWith("CicMarshalWndClass", StringComparison.OrdinalIgnoreCase) &&
+                     !cls.StartsWith("IME", StringComparison.OrdinalIgnoreCase) &&
+                     !cls.StartsWith("MSCTFIME", StringComparison.OrdinalIgnoreCase))
+            {
+                fallbackWindows.Add(hWnd);
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        foreach (var hWnd in targetWindows)
+        {
+            if (PostMessageW(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) posted++;
+        }
+        if (posted == 0)
+        {
+            foreach (var hWnd in fallbackWindows)
+            {
+                if (PostMessageW(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) posted++;
+            }
+        }
+
+        // Also signal per-PID graceful exit event if opened by the target process
+        try
+        {
+            using (var pidEvt = EventWaitHandle.OpenExisting("Local\\LimitsWidget.GracefulExit." + targetPid))
+            {
+                pidEvt.Set();
+                posted++;
+            }
+        }
+        catch (WaitHandleCannotBeOpenedException)
+        {
+        }
+        catch
+        {
+        }
+
+        // Only signal global single-instance exit event when verified no foreign LimitsWidget.exe is running
+        if (allowGlobalExitEvent)
+        {
+            try
+            {
+                using (var globalEvt = EventWaitHandle.OpenExisting("Local\\LimitsWidget.Exit"))
+                {
+                    globalEvt.Set();
+                    posted++;
+                }
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+            }
+            catch
+            {
+            }
+        }
+
+        return posted;
+    }
+}
+'@
+}
 
 $OwnershipMarkerName = '.limits-widget-install'
 $OwnershipMarkerContent = 'LimitsWidget owned installation v1'
@@ -68,13 +199,41 @@ $BackupCandidateFiles = @(
     'widget.log',
     'widget.log.1'
 )
+$UserRuntimePreserveFiles = @(
+    'config.json',
+    'state.json',
+    'widget.log',
+    'widget.log.1'
+)
 
 function Write-Utf8NoBom([string]$Path, [string]$Content) {
     [IO.File]::WriteAllText($Path, $Content, [Text.UTF8Encoding]::new($false))
 }
 
 function Get-LowerSha256([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Test-ValidJsonFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $raw = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8)
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+        $parsed = $raw | ConvertFrom-Json
+        return ($null -ne $parsed)
+    } catch {
+        return $false
+    }
 }
 
 function Write-UpdaterReceipt($Data) {
@@ -314,44 +473,85 @@ function Expand-AndValidatePackage([string]$ResolvedPackageInput, [string]$Stagi
     New-Item -ItemType Directory -Path $stageExtract -Force | Out-Null
 
     if (Test-Path -LiteralPath $ResolvedPackageInput -PathType Leaf) {
+        Assert-NoReparsePoint -Path $ResolvedPackageInput
+        $actualZipHash = Get-LowerSha256 -Path $ResolvedPackageInput
         if (-not [string]::IsNullOrWhiteSpace($ExpectedPackageSha256)) {
-            $actualZipHash = Get-LowerSha256 -Path $ResolvedPackageInput
-            if ($actualZipHash -ne $ExpectedPackageSha256.Trim().ToLowerInvariant()) {
-                throw "Package archive SHA-256 mismatch: expected $($ExpectedPackageSha256.Trim().ToLowerInvariant()), got $actualZipHash"
+            $trimmedExpected = $ExpectedPackageSha256.Trim().ToLowerInvariant()
+            if ($trimmedExpected -notmatch '^[a-f0-9]{64}$') {
+                throw "Invalid -ExpectedPackageSha256 value '$ExpectedPackageSha256'; expected 64 hexadecimal characters."
+            }
+            if ($actualZipHash -ne $trimmedExpected) {
+                throw "Package archive SHA-256 mismatch: expected $trimmedExpected, got $actualZipHash"
             }
         } else {
             $adjacentSums = Join-Path (Split-Path -Parent $ResolvedPackageInput) 'SHA256SUMS.txt'
-            if (Test-Path -LiteralPath $adjacentSums -PathType Leaf) {
-                $zipName = [IO.Path]::GetFileName($ResolvedPackageInput)
-                foreach ($line in Get-Content -LiteralPath $adjacentSums) {
-                    if ($line -match '^([a-fA-F0-9]{64})\s\s(.+)$' -and $Matches[2].Trim() -eq $zipName) {
-                        $actualZipHash = Get-LowerSha256 -Path $ResolvedPackageInput
-                        if ($actualZipHash -ne $Matches[1].ToLowerInvariant()) {
-                            throw "Package archive SHA-256 mismatch against adjacent SHA256SUMS.txt: expected $($Matches[1].ToLowerInvariant()), got $actualZipHash"
-                        }
+            if (-not (Test-Path -LiteralPath $adjacentSums -PathType Leaf)) {
+                throw "Package archive authenticity cannot be verified: provide -ExpectedPackageSha256 or place SHA256SUMS.txt next to '$ResolvedPackageInput'."
+            }
+            Assert-NoReparsePoint -Path $adjacentSums
+            $zipName = [IO.Path]::GetFileName($ResolvedPackageInput)
+            $matchedSumEntry = $false
+            foreach ($line in Get-Content -LiteralPath $adjacentSums) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                if ($line -match '^([a-fA-F0-9]{64})\s+\*?(.+)$' -and $Matches[2].Trim() -eq $zipName) {
+                    $matchedSumEntry = $true
+                    $expectedFromSums = $Matches[1].ToLowerInvariant()
+                    if ($actualZipHash -ne $expectedFromSums) {
+                        throw "Package archive SHA-256 mismatch against adjacent SHA256SUMS.txt: expected $expectedFromSums, got $actualZipHash"
                     }
                 }
             }
+            if (-not $matchedSumEntry) {
+                throw "Package archive '$zipName' is not listed in adjacent SHA256SUMS.txt ('$adjacentSums')."
+            }
         }
 
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $pkgRoot = Join-Path $stageExtract 'limits-widget'
+        New-Item -ItemType Directory -Path $pkgRoot -Force | Out-Null
+        Assert-StrictChildPath -ParentDir $stageExtract -ChildPath $pkgRoot
+
         $zip = [IO.Compression.ZipFile]::OpenRead($ResolvedPackageInput)
         try {
             $expectedZipEntries = ($AllowedPackageFiles + @('package-manifest.json')) | ForEach-Object { "limits-widget/$_" }
-            $actualEntries = @($zip.Entries | Where-Object { $_.FullName -notmatch '/$' } | ForEach-Object { $_.FullName.Replace('\', '/') })
-            if ($actualEntries.Count -ne $expectedZipEntries.Count) {
-                throw "Package archive entry count mismatch: expected $($expectedZipEntries.Count), got $($actualEntries.Count)."
-            }
-            foreach ($entryName in $actualEntries) {
-                if ($expectedZipEntries -notcontains $entryName) {
-                    throw "Unallowlisted entry in package archive: $entryName"
+            $seenFileEntries = @{}
+            foreach ($entry in $zip.Entries) {
+                $rawEntryName = [string]$entry.FullName
+                if ([string]::IsNullOrWhiteSpace($rawEntryName) -or $rawEntryName -match '[\x00-\x1F]') {
+                    throw "Invalid control characters in package archive entry: '$rawEntryName'"
                 }
+                $normEntry = $rawEntryName.Replace('\', '/')
+                if ($normEntry.StartsWith('/', [StringComparison]::Ordinal) -or $normEntry.Contains('..') -or $normEntry.Contains(':')) {
+                    throw "Unsafe path traversal or rooted entry in package archive: '$rawEntryName'"
+                }
+                if ($normEntry.EndsWith('/', [StringComparison]::Ordinal)) {
+                    if ($normEntry -ne 'limits-widget/') {
+                        throw "Unallowlisted directory entry in package archive: '$rawEntryName'"
+                    }
+                    continue
+                }
+                if ($expectedZipEntries -notcontains $normEntry) {
+                    throw "Unallowlisted file entry in package archive: '$rawEntryName'"
+                }
+                if ($seenFileEntries.ContainsKey($normEntry)) {
+                    throw "Duplicate file entry in package archive: '$rawEntryName'"
+                }
+                $seenFileEntries[$normEntry] = $entry
+            }
+
+            if ($seenFileEntries.Count -ne $expectedZipEntries.Count) {
+                throw "Package archive file entry count mismatch: expected $($expectedZipEntries.Count), got $($seenFileEntries.Count)."
+            }
+
+            foreach ($normEntry in $expectedZipEntries) {
+                $zipEntry = $seenFileEntries[$normEntry]
+                $leafName = $normEntry.Substring('limits-widget/'.Length)
+                $destPath = Join-Path $pkgRoot $leafName
+                Assert-StrictChildPath -ParentDir $pkgRoot -ChildPath $destPath
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($zipEntry, $destPath, $true)
             }
         } finally {
             $zip.Dispose()
         }
-        Expand-Archive -LiteralPath $ResolvedPackageInput -DestinationPath $stageExtract -Force
-        $pkgRoot = Join-Path $stageExtract 'limits-widget'
     } elseif (Test-Path -LiteralPath $ResolvedPackageInput -PathType Container) {
         if (-not [string]::IsNullOrWhiteSpace($ExpectedPackageSha256)) {
             throw '-ExpectedPackageSha256 requires -PackagePath to point to a .zip archive file.'
@@ -448,98 +648,94 @@ function Expand-AndValidatePackage([string]$ResolvedPackageInput, [string]$Stagi
 
 function Get-TargetProcessState([string]$FullTargetDir) {
     $targetExe = [IO.Path]::GetFullPath((Join-Path $FullTargetDir 'LimitsWidget.exe'))
+    $targetPrefix = $FullTargetDir.TrimEnd('\', '/') + '\'
     $allCim = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
     $ownedRoots = @()
+    $ownedTargetExes = @()
     $foreignLimits = @()
 
     foreach ($p in $allCim) {
+        $procPid = [int]$p.ProcessId
+        if ($procPid -eq $PID) { continue }
         $exe = [string]$p.ExecutablePath
         $name = [string]$p.Name
-        if (-not [string]::IsNullOrEmpty($exe) -and [string]::Equals([IO.Path]::GetFullPath($exe), $targetExe, [StringComparison]::OrdinalIgnoreCase)) {
-            $ownedRoots += $p
+        if (-not [string]::IsNullOrEmpty($exe)) {
+            $fullExe = $null
+            try { $fullExe = [IO.Path]::GetFullPath($exe) } catch { $fullExe = $exe }
+            if ([string]::Equals($fullExe, $targetExe, [StringComparison]::OrdinalIgnoreCase)) {
+                $ownedRoots += $p
+                $ownedTargetExes += $p
+            } elseif ($fullExe.StartsWith($targetPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                $ownedTargetExes += $p
+            } elseif ($name -match '^LimitsWidget(\.exe)?$') {
+                $foreignLimits += $p
+            }
         } elseif ($name -match '^LimitsWidget(\.exe)?$') {
             $foreignLimits += $p
-        }
-    }
-
-    $ownedTree = @()
-    $queue = [Collections.Generic.Queue[object]]::new()
-    $visited = @{}
-    foreach ($rootProc in $ownedRoots) {
-        $pidVal = [int]$rootProc.ProcessId
-        $visited[$pidVal] = $true
-        $ownedTree += $rootProc
-        $queue.Enqueue($rootProc)
-    }
-
-    while ($queue.Count -gt 0) {
-        $parent = $queue.Dequeue()
-        $parentPid = [int]$parent.ProcessId
-        $parentCreated = $parent.CreationDate
-        foreach ($cand in $allCim) {
-            $candPid = [int]$cand.ProcessId
-            if ($visited.ContainsKey($candPid)) { continue }
-            if ([int]$cand.ParentProcessId -eq $parentPid -and $candPid -ne $PID) {
-                if ($null -eq $parentCreated -or $null -eq $cand.CreationDate -or $cand.CreationDate -ge $parentCreated) {
-                    $visited[$candPid] = $true
-                    $ownedTree += $cand
-                    $queue.Enqueue($cand)
-                }
-            }
         }
     }
 
     return [pscustomobject]@{
         TargetExe         = $targetExe
         OwnedRootPids     = @($ownedRoots | ForEach-Object { [int]$_.ProcessId })
-        OwnedTreePids     = @($ownedTree | ForEach-Object { [int]$_.ProcessId })
-        OwnedTreeRecords  = $ownedTree
+        OwnedRootRecords  = $ownedRoots
+        OwnedTreePids     = @($ownedTargetExes | ForEach-Object { [int]$_.ProcessId })
+        OwnedTreeRecords  = $ownedTargetExes
         ForeignLimitsPids = @($foreignLimits | ForEach-Object { [int]$_.ProcessId })
     }
 }
 
-function Stop-OwnedTargetProcesses([string]$FullTargetDir) {
-    $state = Get-TargetProcessState -FullTargetDir $FullTargetDir
-    if ($state.OwnedTreePids.Count -eq 0) {
-        return $state
+function Stop-OwnedTargetProcessesGracefully([string]$FullTargetDir, [int]$TimeoutSeconds = 10) {
+    $initialState = Get-TargetProcessState -FullTargetDir $FullTargetDir
+    if ($initialState.OwnedTreePids.Count -eq 0) {
+        return $initialState
     }
 
-    # Try graceful main-window close on exact owned root PIDs first (never signaling global named event if foreign LimitsWidget exists).
-    foreach ($rootPid in $state.OwnedRootPids) {
-        try {
-            $proc = Get-Process -Id $rootPid -ErrorAction SilentlyContinue
-            if ($null -ne $proc -and -not $proc.HasExited) {
-                [void]$proc.CloseMainWindow()
-            }
-        } catch { }
-    }
-    Start-Sleep -Milliseconds 300
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(1, $TimeoutSeconds))
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $currentState = Get-TargetProcessState -FullTargetDir $FullTargetDir
+        if ($currentState.OwnedTreePids.Count -eq 0) {
+            Start-Sleep -Milliseconds 100
+            return $initialState
+        }
 
-    # Stop children first (reverse discovery order), then roots, verifying creation timestamp / identity.
-    $ordered = @($state.OwnedTreeRecords)
-    [Array]::Reverse($ordered)
-    foreach ($rec in $ordered) {
-        $pidToStop = [int]$rec.ProcessId
-        if ($pidToStop -eq $PID) { continue }
-        try {
-            $liveCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $pidToStop" -ErrorAction SilentlyContinue
-            if ($null -ne $liveCim) {
+        $allowGlobalExit = ($currentState.ForeignLimitsPids.Count -eq 0 -and $currentState.OwnedRootPids.Count -gt 0)
+        foreach ($rec in $currentState.OwnedTreeRecords) {
+            $pidToStop = [int]$rec.ProcessId
+            if ($pidToStop -eq $PID) { continue }
+            try {
+                $liveCim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $pidToStop" -ErrorAction SilentlyContinue
+                if ($null -eq $liveCim) { continue }
                 if ($null -ne $rec.CreationDate -and $null -ne $liveCim.CreationDate -and $liveCim.CreationDate -ne $rec.CreationDate) {
                     continue
                 }
-                Stop-Process -Id $pidToStop -Force -ErrorAction SilentlyContinue
-            }
-        } catch { }
-    }
+                $liveExe = [string]$liveCim.ExecutablePath
+                if ([string]::IsNullOrEmpty($liveExe)) { continue }
+                $fullLiveExe = [IO.Path]::GetFullPath($liveExe)
+                $targetPrefix = $FullTargetDir.TrimEnd('\', '/') + '\'
+                if (-not $fullLiveExe.StartsWith($targetPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
 
-    # Wait up to 5 seconds for target exe handles to release
-    $deadline = [DateTime]::UtcNow.AddSeconds(5)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $remaining = Get-TargetProcessState -FullTargetDir $FullTargetDir
-        if ($remaining.OwnedRootPids.Count -eq 0) { break }
+                $proc = Get-Process -Id $pidToStop -ErrorAction SilentlyContinue
+                if ($null -ne $proc -and -not $proc.HasExited) {
+                    try { [void]$proc.CloseMainWindow() } catch { }
+                }
+                [void][LimitsWidgetUpdaterNative]::RequestGracefulWindowClose($pidToStop, $allowGlobalExit)
+            } catch {
+            }
+        }
+
         Start-Sleep -Milliseconds 150
     }
-    return $state
+
+    $finalCheck = Get-TargetProcessState -FullTargetDir $FullTargetDir
+    if ($finalCheck.OwnedTreePids.Count -gt 0) {
+        $stillRunningList = $finalCheck.OwnedTreePids -join ', '
+        throw "Graceful shutdown could not be confirmed within ${TimeoutSeconds}s for target process PID(s): $stillRunningList. Force termination is disabled by policy; close the target LimitsWidget instance and retry."
+    }
+
+    return $initialState
 }
 
 function New-TargetBackup([string]$FullTargetDir, [string]$CustomBackupRoot) {
@@ -630,20 +826,28 @@ function New-TargetBackup([string]$FullTargetDir, [string]$CustomBackupRoot) {
     }
 }
 
-function Restore-FromBackup([string]$FullTargetDir, [string]$BackupDir) {
-    Assert-NoReparsePointsInTree -RootPath $BackupDir
-    $bmPath = Join-Path $BackupDir 'backup-manifest.json'
+function Restore-FromBackup([string]$FullTargetDir, [string]$BackupDir, [int]$TimeoutSeconds = 10) {
+    $safeBackupDir = Assert-SafeDirectoryPath -RawPath $BackupDir -ParameterName 'RollbackFromBackup' -AllowExtractDir
+    Assert-NoReparsePointsInTree -RootPath $safeBackupDir
+    $bmPath = Join-Path $safeBackupDir 'backup-manifest.json'
     if (-not (Test-Path -LiteralPath $bmPath -PathType Leaf)) {
         throw "Backup manifest not found at '$bmPath'."
     }
     $bm = [IO.File]::ReadAllText($bmPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
     if ($null -eq $bm -or $bm.schemaVersion -ne '1.0') {
-        throw "Invalid backup-manifest.json in '$BackupDir'."
+        throw "Invalid backup-manifest.json in '$safeBackupDir'."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$bm.targetPath)) {
+        throw "Backup manifest in '$safeBackupDir' is missing targetPath."
+    }
+    $manifestTarget = [IO.Path]::GetFullPath([string]$bm.targetPath).TrimEnd('\', '/')
+    if (-not [string]::Equals($manifestTarget, $FullTargetDir, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Cross-target rollback rejected: backup '$safeBackupDir' belongs to '$manifestTarget', not '$FullTargetDir'."
     }
 
-    # Verify backup snapshot hashes before restoring
-    $snapshotDir = Join-Path $BackupDir 'snapshot'
-    $legacySnapDir = Join-Path $BackupDir 'legacy'
+    # Verify backup snapshot hashes before stopping processes or mutating target
+    $snapshotDir = Join-Path $safeBackupDir 'snapshot'
+    $legacySnapDir = Join-Path $safeBackupDir 'legacy'
     foreach ($bf in @($bm.backedUpFiles)) {
         $snapFile = Join-Path $snapshotDir ([string]$bf.path)
         Assert-StrictChildPath -ParentDir $snapshotDir -ChildPath $snapFile
@@ -668,7 +872,8 @@ function Restore-FromBackup([string]$FullTargetDir, [string]$BackupDir) {
         }
     }
 
-    [void](Stop-OwnedTargetProcesses -FullTargetDir $FullTargetDir)
+    # Gracefully stop any running target process before mutating target files
+    [void](Stop-OwnedTargetProcessesGracefully -FullTargetDir $FullTargetDir -TimeoutSeconds $TimeoutSeconds)
 
     # Clean up any leftover .new staging files
     foreach ($rel in ($AllowedPackageFiles + @('package-manifest.json'))) {
@@ -678,21 +883,36 @@ function Restore-FromBackup([string]$FullTargetDir, [string]$BackupDir) {
         }
     }
 
-    # Remove files that did not exist before the update
+    # Remove application files that did not exist before the update, but never delete user config/state/logs
     foreach ($added in @($bm.missingBeforeUpdate)) {
-        $addedPath = Join-Path $FullTargetDir ([string]$added)
+        $addedRel = [string]$added
+        if ($UserRuntimePreserveFiles -contains $addedRel) {
+            continue
+        }
+        $addedPath = Join-Path $FullTargetDir $addedRel
         if (Test-Path -LiteralPath $addedPath) {
             Remove-ContainedPath -ParentDir $FullTargetDir -ChildPath $addedPath
         }
     }
 
-    # Restore backed up files
+    # Restore backed up application files; preserve valid on-disk config.json/state.json/logs so post-update user edits are never lost
     foreach ($bf in @($bm.backedUpFiles)) {
         $rel = [string]$bf.path
         $snapFile = Join-Path $snapshotDir $rel
         $destFile = Join-Path $FullTargetDir $rel
         Assert-StrictChildPath -ParentDir $FullTargetDir -ChildPath $destFile
         Assert-NoReparsePoint -Path $destFile
+
+        if ($rel -eq 'config.json' -or $rel -eq 'state.json') {
+            if (Test-ValidJsonFile -Path $destFile) {
+                continue
+            }
+        } elseif ($rel -eq 'widget.log' -or $rel -eq 'widget.log.1') {
+            if (Test-Path -LiteralPath $destFile -PathType Leaf) {
+                continue
+            }
+        }
+
         Copy-Item -LiteralPath $snapFile -Destination $destFile -Force
         if ((Get-LowerSha256 -Path $destFile) -ne ([string]$bf.sha256).ToLowerInvariant()) {
             throw "Rollback verification failed for '$rel'."
@@ -794,10 +1014,31 @@ try {
             }
             $resolvedBackup = $latestDir.FullName
         } else {
-            $resolvedBackup = [IO.Path]::GetFullPath($RollbackFromBackup)
+            $resolvedBackup = Assert-SafeDirectoryPath -RawPath $RollbackFromBackup -ParameterName 'RollbackFromBackup' -AllowExtractDir
         }
 
-        Restore-FromBackup -FullTargetDir $fullTarget -BackupDir $resolvedBackup
+        try {
+            Restore-FromBackup -FullTargetDir $fullTarget -BackupDir $resolvedBackup -TimeoutSeconds $GracefulStopTimeoutSeconds
+        } catch {
+            $rbErr = $_
+            $blockedReceipt = [ordered]@{
+                mode          = 'rollback-blocked'
+                status        = 'ROLLBACK_ABORTED_BEFORE_MUTATION'
+                acceptance    = $false
+                mutatedTarget = $false
+                targetPath    = $fullTarget
+                backupPath    = $resolvedBackup
+                error         = $rbErr.Exception.Message
+                timestampUtc  = [DateTime]::UtcNow.ToString('o')
+            }
+            Write-UpdaterReceipt -Data $blockedReceipt
+            throw
+        }
+
+        if ($RestartWidget -and (Test-Path -LiteralPath (Join-Path $fullTarget 'LimitsWidget.exe') -PathType Leaf)) {
+            Start-Process -FilePath (Join-Path $fullTarget 'LimitsWidget.exe') -WorkingDirectory $fullTarget
+        }
+
         $receipt = [ordered]@{
             mode          = 'rollback'
             status        = 'ROLLED_BACK'
@@ -828,38 +1069,58 @@ try {
 
     if ($DryRun) {
         $receipt = [ordered]@{
-            mode                = 'dry-run'
-            status              = 'DRY_RUN_OK'
-            acceptance          = $false
-            mutatedTarget       = $false
-            targetPath          = $fullTarget
-            packageVersion      = [string]$validated.Manifest.version
-            executableVersion   = [string]$validated.Manifest.executableVersion
-            preserveConfig      = [bool]$configExists
-            preserveState       = [bool]$stateExists
+            mode                 = 'dry-run'
+            status               = 'DRY_RUN_OK'
+            acceptance           = $false
+            mutatedTarget        = $false
+            targetPath           = $fullTarget
+            packageVersion       = [string]$validated.Manifest.version
+            executableVersion    = [string]$validated.Manifest.executableVersion
+            preserveConfig       = [bool]$configExists
+            preserveState        = [bool]$stateExists
             legacyItemsToArchive = $existingLegacy
-            replaceFiles        = $ReplacePackageFiles
-            ownedTargetRootPids = $procBefore.OwnedRootPids
-            ownedTargetTreePids = $procBefore.OwnedTreePids
-            foreignLimitsPids   = $procBefore.ForeignLimitsPids
-            timestampUtc        = [DateTime]::UtcNow.ToString('o')
-            note                = 'Dry-run validated package manifest/hashes and target path containment without modifying files or stopping processes.'
+            replaceFiles         = $ReplacePackageFiles
+            ownedTargetRootPids  = $procBefore.OwnedRootPids
+            ownedTargetTreePids  = $procBefore.OwnedTreePids
+            foreignLimitsPids    = $procBefore.ForeignLimitsPids
+            timestampUtc         = [DateTime]::UtcNow.ToString('o')
+            note                 = 'Dry-run validated package manifest/hashes and target path containment without modifying files or stopping processes.'
         }
         Write-UpdaterReceipt -Data $receipt
         Write-Host "DRY_RUN_OK: $fullTarget (version $($validated.Manifest.version))"
         exit 0
     }
 
-    # Live Update: ensure TargetPath exists
+    # Live Update Step 1: Gracefully stop owned target process(es) BEFORE creating directories, hashing config/state, or creating backups.
+    $stoppedState = $null
+    try {
+        $stoppedState = Stop-OwnedTargetProcessesGracefully -FullTargetDir $fullTarget -TimeoutSeconds $GracefulStopTimeoutSeconds
+    } catch {
+        $stopErr = $_
+        $abortReceipt = [ordered]@{
+            mode          = 'update-aborted'
+            status        = 'ABORTED_PROCESS_STILL_RUNNING'
+            acceptance    = $false
+            mutatedTarget = $false
+            targetPath    = $fullTarget
+            error         = $stopErr.Exception.Message
+            timestampUtc  = [DateTime]::UtcNow.ToString('o')
+        }
+        Write-UpdaterReceipt -Data $abortReceipt
+        throw
+    }
+
+    # Live Update Step 2: Ensure TargetPath exists and capture quiescent config/state hashes and backup
     if (-not (Test-Path -LiteralPath $fullTarget)) {
         New-Item -ItemType Directory -Path $fullTarget -Force | Out-Null
     }
 
+    $configExists = Test-Path -LiteralPath (Join-Path $fullTarget 'config.json') -PathType Leaf
+    $stateExists = Test-Path -LiteralPath (Join-Path $fullTarget 'state.json') -PathType Leaf
     $preConfigHash = if ($configExists) { Get-LowerSha256 -Path (Join-Path $fullTarget 'config.json') } else { $null }
     $preStateHash = if ($stateExists) { Get-LowerSha256 -Path (Join-Path $fullTarget 'state.json') } else { $null }
 
     $backupInfo = New-TargetBackup -FullTargetDir $fullTarget -CustomBackupRoot $BackupRoot
-    $stoppedState = Stop-OwnedTargetProcesses -FullTargetDir $fullTarget
 
     $archivedLegacyDir = $null
     try {
@@ -956,7 +1217,7 @@ try {
     } catch {
         $updateErr = $_
         try {
-            Restore-FromBackup -FullTargetDir $fullTarget -BackupDir $backupInfo.BackupDir
+            Restore-FromBackup -FullTargetDir $fullTarget -BackupDir $backupInfo.BackupDir -TimeoutSeconds $GracefulStopTimeoutSeconds
             $rollbackReceipt = [ordered]@{
                 mode          = 'update-rolled-back'
                 status        = 'ROLLED_BACK_ON_FAILURE'
@@ -996,7 +1257,7 @@ try {
         stoppedTreePids     = $stoppedState.OwnedTreePids
         foreignLimitsPids   = $stoppedState.ForeignLimitsPids
         timestampUtc        = [DateTime]::UtcNow.ToString('o')
-        note                = 'Update completed with verified manifest hashes and backup; live runtime acceptance requires separate Root verification.'
+        note                = 'Update completed with graceful target stop, verified manifest hashes, and backup; live runtime acceptance requires separate Root verification.'
     }
     Write-UpdaterReceipt -Data $receipt
     Write-Host "UPDATED: $fullTarget (version $($validated.Manifest.version), backup: $($backupInfo.BackupDir))"

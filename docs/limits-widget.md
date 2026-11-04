@@ -18,7 +18,7 @@
 
 Виджет **«Системные ресурсы» 1.1.1** остаётся на опубликованном релизе [**v0.1.1**](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.1) без изменения ссылок и контрольных сумм.
 
-Внутри архива `LimitsWidget-1.1.0-win-x64.zip` в папке `limits-widget/` находятся только проверенные файлы из белого списка:
+Внутри архива `LimitsWidget-1.1.0-win-x64.zip` в папке `limits-widget/` находятся ровно 7 проверенных файлов из белого списка (6 файлов пакета + `package-manifest.json`):
 
 | Файл | Назначение | Режим при обновлении |
 |---|---|---|
@@ -27,8 +27,8 @@
 | `config.example.json` | Эталонный публичный пример конфигурации | Заменяется (`replace`) |
 | `LICENSE` | Лицензия MIT | Заменяется (`replace`) |
 | `START-HERE.txt` | Краткая памятка по первому запуску и обновлению (RU/EN, версия `1.1.0`) | Заменяется (`replace`) |
-| `update-limits-widget.ps1` | Обратимый скрипт установки и обновления с проверкой манифеста и резервной копией | Заменяется (`replace`) |
-| `package-manifest.json` | Манифест пакета (`version: "1.1.0"`, `releaseTag: "v0.2.0"`, размеры и SHA-256 всех файлов) | Записывается после проверки |
+| `update-limits-widget.ps1` | Обратимый скрипт установки и обновления с проверкой манифеста, штатным закрытием виджета и резервной копией | Заменяется (`replace`) |
+| `package-manifest.json` | Манифест пакета (`version: "1.1.0"`, `releaseTag: "v0.2.0"`, размеры и SHA-256 всех 6 файлов поставки) | Записывается после проверки |
 
 Личные `config.json`, `state.json`, журналы `widget.log`, пути к локальным программам, токены, учётные записи и сторонние бинарники CLI в архив никогда не включаются.
 
@@ -100,13 +100,15 @@
 
 Скрипт `scripts/update-limits-widget.ps1` (также включённый внутрь архива `limits-widget/update-limits-widget.ps1`) выполняет безопасную установку или обновление существующей папки виджета:
 
-1. **Проверка до любых изменений:** требует явный локальный путь `-TargetPath` (отклоняет корни дисков, относительные и сетевые пути, системные/пользовательские корневые папки, папки с точками перенаправления NTFS / junction, рабочие копии Git и непустые посторонние каталоги). Проверяет `package-manifest.json`, контрольные суммы SHA-256 всех файлов пакета и метаданные `LimitsWidget.exe` до остановки процесса или записи на диск.
-2. **Точное владение процессом:** останавливает только процесс `LimitsWidget.exe`, запущенный ровно из `<TargetPath>\LimitsWidget.exe`, и его дочернее дерево процессов. Процессы в других папках и внешние CLI не затрагиваются.
-3. **Сохранность настроек и истории:** существующие `config.json` и `state.json` (включая все пользовательские и неизвестные поля) и посторонние пользовательские файлы сохраняются без изменений.
+1. **Проверка подлинности и изоляции до любых изменений:** требует явный локальный путь `-TargetPath` (отклоняет корни дисков, относительные и сетевые пути, системные/пользовательские корневые папки, папки с точками перенаправления NTFS / junction, рабочие копии Git и непустые посторонние каталоги). Для архива `.zip` проверяет контрольную сумму SHA-256 по явному параметру `-ExpectedPackageSha256` или по лежащему рядом `SHA256SUMS.txt`, проверяет отсутствие обхода путей (`..`) во всех записях архива, проверяет `package-manifest.json`, контрольные суммы SHA-256 всех файлов пакета и метаданные `LimitsWidget.exe` до остановки процесса или записи на диск.
+2. **Штатное (graceful-only) завершение целевого процесса без принудительного снятия задач:** запрашивает штатный выход (`WM_CLOSE` окну целевого процесса и событие выхода одиночного экземпляра при отсутствии других копий) только у процесса `LimitsWidget.exe`, запущенного ровно из `<TargetPath>\LimitsWidget.exe` (проверяются PID, полный путь и время запуска). Посторонние копии `LimitsWidget.exe`, внешние программы, браузеры и CLI никогда не закрываются; принудительное завершение (`Stop-Process -Force` / `TerminateProcess`) не используется. Если целевой процесс не завершился штатно за `-GracefulStopTimeoutSeconds` (по умолчанию 10 с), обновление или откат прерывается **до внесения любых изменений** в `<TargetPath>`.
+3. **Сохранность настроек и истории (включая запись при выходе и правки после обновления):** целевой виджет штатно завершается **до** снятия контрольных сумм и резервной копии, поэтому финальное сохранение `state.json` при закрытии окна не конфликтует с обновлением. Существующие `config.json` и `state.json` (включая все пользовательские и неизвестные поля) и посторонние пользовательские файлы сохраняются без изменений, в том числе при последующем откате `-RollbackFromBackup`.
 4. **Безопасная архивация старых исходников:** если в обновляемой папке остались старые каталоги и скрипты прежней поставки (`src/`, `assets/`, `tools/`, `fixtures/`, `build.ps1`, `app.manifest`, `README.md`), они не удаляются, а переносятся в `<TargetPath>\.limits-widget-legacy\legacy-<timestamp>\`.
-5. **Резервная копия и автоматический откат:** перед обновлением создаётся полный снимок в `<TargetPath>\.limits-widget-backups\backup-<timestamp>\`. При любой ошибке во время обновления состояние папки автоматически восстанавливается из резервной копии.
+5. **Резервная копия и автоматический откат:** перед обновлением создаётся полный снимок в `<TargetPath>\.limits-widget-backups\backup-<timestamp>\` с привязкой к конкретному `targetPath` (чужую резервную копию нельзя применить к другой папке). При любой ошибке во время обновления состояние папки автоматически восстанавливается из резервной копии.
 
 ### Команды PowerShell
+
+Разместите `SHA256SUMS.txt` рядом с `LimitsWidget-1.1.0-win-x64.zip` (либо передайте `-ExpectedPackageSha256 "<sha256>"`).
 
 Проверка без внесения изменений (`-DryRun`):
 
@@ -144,8 +146,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update-limits-widg
 Сборка и полная офлайн-проверка пакета из корня репозитория:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-limits-release.ps1 -OutputDirectory .\.work\limits-1.1\package\release
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-limits-release.ps1 -ArtifactsDirectory .\.work\limits-1.1\package\release -ResultsDirectory .\.work\limits-1.1\package\test-results
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-limits-release.ps1 -OutputDirectory .\artifacts\limits-release
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-limits-release.ps1 -ArtifactsDirectory .\artifacts\limits-release -ResultsDirectory .\artifacts\limits-test-results
 ```
 
 ---
@@ -163,7 +165,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-limits-releas
 - **Kimi Code без десктопного приложения:** перебор доступных локальных loopback-серверов и опциональный запуск собственного фонового `kimi web --no-open` без браузера и консольного окна. Чужие серверы сохраняются; собственное дерево процессов завершается при выходе из виджета. Отклонение некорректных долей (`NaN`, `Infinity`, вне `0..1`) и пустых отозванных токенов; явное действие входа через `kimi`.
 - **Точность состояния и времени:** хранение времени в UTC с локализацией в UI, полный roundtrip полей `ServiceSnapshot` в `state.json`, раздельные `cache` (last-good) и `attempts` (latest-attempt), сохранение типизированных пулов для модельных окон Claude (`model_scoped`) без превращения отсутствующего `utilization` в `0 %`.
 - **Производительность:** немедленная публикация результата каждого провайдера по мере готовности, отдельный 15-минутный кэш кредитов Antigravity, пропуск перестройки дерева WPF при свёрнутой в трей карточке и кэш разрешения путей CLI.
-- **Обратимое обновление:** в архив добавлены `package-manifest.json` и `update-limits-widget.ps1` с проверкой SHA-256 до изменений, сохранением `config.json`/`state.json` (включая неизвестные поля), архивацией старых `src`/`build.ps1` и откатом из резервной копии. Все провайдеры по умолчанию выключены (`enabled: false`, `allowLocalTokens: false`).
+- **Обратимое обновление:** в архив добавлены `package-manifest.json` и `update-limits-widget.ps1` с проверкой SHA-256 архива и файлов до изменений, штатным (graceful-only) закрытием только целевого `LimitsWidget.exe` без принудительного снятия задач, сохранением `config.json`/`state.json` (включая неизвестные поля и пользовательские правки при откате), архивацией старых `src`/`build.ps1` и откатом из резервной копии. Все провайдеры по умолчанию выключены (`enabled: false`, `allowLocalTokens: false`).
 
 ### English (EN)
 
@@ -176,4 +178,4 @@ This prerelease ships **AI Limits 1.1.0** (`LimitsWidget-1.1.0-win-x64.zip` + `S
 - **Kimi Code headless loopback support:** probes live loopback candidates from the local registry with bounded fallback, and can launch an owned headless `kimi web --no-open` server when enabled and no server is running. Reuses and never stops foreign servers; terminates only its own server process tree on widget exit. Rejects invalid/NaN usage ratios and revoked/empty token files; delegates authentication to native `kimi`.
 - **State, UTC & Claude scoped windows:** UTC persistence with local-time UI rendering, full `ServiceSnapshot` cache roundtrip, separate `lastGood` (`cache`) and `latestAttempt` (`attempts`) records, and typed quota metadata for confirmed Claude model-scoped windows while keeping missing `utilization` unknown rather than `0%`.
 - **Performance:** immediate per-provider UI and telemetry publication with generation guards, decoupled Antigravity `/credits` cache (15 min TTL / 10s timeout), skipped WPF visual tree rebuilds while hidden to the tray, and invalidated CLI path caching.
-- **Reversible updater (`update-limits-widget.ps1` & `package-manifest.json`):** verifies manifest and SHA-256 hashes before mutation, stops only the exact target `LimitsWidget.exe` process tree, preserves `config.json` and `state.json` (including unknown fields), safely archives legacy `src/` and `build.ps1`, and supports `-DryRun`, `-ExtractTo`, and `-RollbackFromBackup`. All providers remain disabled by default (`allowLocalTokens: false`).
+- **Reversible graceful updater (`update-limits-widget.ps1` & `package-manifest.json`):** verifies archive SHA-256 (`-ExpectedPackageSha256` or adjacent `SHA256SUMS.txt`), manifest, and per-file hashes before mutation, requests graceful-only exit of the exact target `LimitsWidget.exe` (never force-killing processes or external apps/browsers, and aborting before mutation if graceful stop cannot be confirmed), preserves `config.json` and `state.json` (including unknown fields and post-update edits across rollback), safely archives legacy `src/` and `build.ps1`, and supports `-DryRun`, `-ExtractTo`, and `-RollbackFromBackup`. All providers remain disabled by default (`allowLocalTokens: false`).

@@ -1,7 +1,8 @@
-<# Validates release archives, manifest/version consistency, reversible updater lifecycle,
+<# Validates release archives, manifest/version consistency, reversible graceful updater lifecycle,
    installer extraction and network persistence without installing on the host.
    Supports -Scope All (default), -Scope Limits (v0.2.0 LimitsWidget-1.1.0-win-x64.zip + SHA256SUMS.txt),
-   and -Scope Resources. Results are saved outside the release assets. No widget UI is launched. #>
+   and -Scope Resources. Results are saved outside the release assets. No widget UI is launched
+   and no forced process termination is used. #>
 param(
     [Parameter(Mandatory=$true)][string]$ArtifactsDirectory,
     [Parameter(Mandatory=$true)][string]$ResultsDirectory,
@@ -20,7 +21,27 @@ if (Test-Path -LiteralPath $results) { throw 'Use a new results directory.' }
 New-Item -ItemType Directory -Path $results | Out-Null
 
 function Assert($condition, [string]$message) { if (-not $condition) { throw $message } }
-function Get-LowerSha256([string]$path) { return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Get-LowerSha256([string]$path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
+function Signal-GracefulEvent([string]$eventName) {
+    if ([string]::IsNullOrWhiteSpace($eventName)) { return }
+    try {
+        $evt = [System.Threading.EventWaitHandle]::OpenExisting($eventName)
+        try { [void]$evt.Set() } finally { $evt.Dispose() }
+    } catch {
+    }
+}
 
 $sumsPath = Join-Path $artifacts 'SHA256SUMS.txt'
 Assert (Test-Path -LiteralPath $sumsPath -PathType Leaf) 'Missing SHA256SUMS.txt in artifacts directory.'
@@ -38,11 +59,10 @@ if ($Scope -eq 'Limits') {
     Assert ($actualArtifactFiles.Count -eq 1 -and $actualArtifactFiles[0] -eq 'LimitsWidget-1.1.0-win-x64.zip') 'Scoped Limits release must carry only LimitsWidget-1.1.0-win-x64.zip + SHA256SUMS.txt.'
 }
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 foreach ($archive in Get-ChildItem -LiteralPath $artifacts -Filter '*.zip') {
     $zip = [IO.Compression.ZipFile]::OpenRead($archive.FullName)
     try {
-        $names = @($zip.Entries | Where-Object { $_.FullName -notmatch '/$' } | ForEach-Object { $_.FullName.Replace('\','/') })
         $folder = if ($archive.Name.StartsWith('ResourcesWidget-')) { 'resources-widget' } else { 'limits-widget' }
         $exe = if ($folder -eq 'resources-widget') { 'ResourcesWidget.exe' } else { 'LimitsWidget.exe' }
         $allowed = @("$folder/$exe", "$folder/config.json", "$folder/config.example.json", "$folder/LICENSE", "$folder/START-HERE.txt")
@@ -51,8 +71,18 @@ foreach ($archive in Get-ChildItem -LiteralPath $artifacts -Filter '*.zip') {
         } else {
             $allowed += @("$folder/update-limits-widget.ps1", "$folder/package-manifest.json")
         }
-        Assert ($names.Count -eq $allowed.Count) "Unexpected file count in portable archive $($archive.Name): got $($names.Count), expected $($allowed.Count)."
-        foreach ($name in $names) { Assert ($allowed -contains $name) "Unexpected archive file: $name" }
+        $fileNames = @()
+        foreach ($entry in $zip.Entries) {
+            $norm = $entry.FullName.Replace('\', '/')
+            Assert (-not $norm.Contains('..') -and -not $norm.Contains(':') -and -not $norm.StartsWith('/')) "Unsafe archive entry: $norm"
+            if ($norm.EndsWith('/')) {
+                Assert ($norm -eq "$folder/") "Unexpected directory entry in archive $($archive.Name): $norm"
+            } else {
+                $fileNames += $norm
+            }
+        }
+        Assert ($fileNames.Count -eq $allowed.Count) "Unexpected file count in portable archive $($archive.Name): got $($fileNames.Count), expected $($allowed.Count)."
+        foreach ($name in $fileNames) { Assert ($allowed -contains $name) "Unexpected archive file: $name" }
     } finally { $zip.Dispose() }
     Expand-Archive -LiteralPath $archive.FullName -DestinationPath $results
 }
@@ -66,14 +96,14 @@ if ($testResources) {
     Assert ($p.ExitCode -eq 0) 'Installer payload extraction failed.'
     Assert (@(Get-ChildItem -LiteralPath $extract -File).Count -eq 5) 'Unexpected installer resources.'
     foreach ($name in @('ResourcesWidget.exe','config.json')) {
-        Assert ((Get-FileHash -LiteralPath (Join-Path $extract $name)).Hash -eq (Get-FileHash -LiteralPath (Join-Path $results ('resources-widget/' + $name))).Hash) "Setup/portable mismatch: $name"
+        Assert ((Get-LowerSha256 (Join-Path $extract $name)) -eq (Get-LowerSha256 (Join-Path $results ('resources-widget/' + $name)))) "Setup/portable mismatch: $name"
     }
     $cfg = Get-Content -LiteralPath (Join-Path $extract 'config.json') -Raw | ConvertFrom-Json
     Assert ($cfg.pingHost -eq '1.1.1.1' -and $cfg.lhmUrl -eq 'http://127.0.0.1:8085/data.json') 'Network or sensor defaults were lost.'
-    $before = (Get-FileHash -LiteralPath (Join-Path $extract 'config.json')).Hash
+    $before = Get-LowerSha256 (Join-Path $extract 'config.json')
     $p = Start-Process -FilePath $setup -ArgumentList @('--extract', ('"' + $extract + '"')) -WindowStyle Hidden -PassThru -Wait
     Assert ($p.ExitCode -eq 1) 'Extraction should refuse an existing directory.'
-    Assert ((Get-FileHash -LiteralPath (Join-Path $extract 'config.json')).Hash -eq $before) 'Extraction overwrote an existing config.'
+    Assert ((Get-LowerSha256 (Join-Path $extract 'config.json')) -eq $before) 'Extraction overwrote an existing config.'
     foreach ($flag in @('--sensor','--with-sensor','--sensor-remove')) {
         $forbidden = Join-Path $results 'sensor-must-not-install'
         $p = Start-Process -FilePath $setup -ArgumentList @($flag,'--quiet','--extract',('"' + $forbidden + '"')) -WindowStyle Hidden -PassThru -Wait
@@ -129,6 +159,8 @@ if ($testLimits) {
     $limitsDir = Join-Path $results 'limits-widget'
     $limitsZip = Join-Path $artifacts 'LimitsWidget-1.1.0-win-x64.zip'
     Assert (Test-Path -LiteralPath $limitsZip -PathType Leaf) 'Missing LimitsWidget-1.1.0-win-x64.zip.'
+    $limitsZipItem = Get-Item -LiteralPath $limitsZip -Force
+    $limitsZipHash = Get-LowerSha256 $limitsZip
 
     # 1. Config sanitization & default opt-in verification
     $cfgRaw = Get-Content -LiteralPath (Join-Path $limitsDir 'config.json') -Raw
@@ -145,7 +177,9 @@ if ($testLimits) {
     $manifest = Get-Content -LiteralPath (Join-Path $limitsDir 'package-manifest.json') -Raw | ConvertFrom-Json
     Assert ($manifest.schemaVersion -eq '1.0' -and $manifest.product -eq 'LimitsWidget') 'Invalid package-manifest.json identity.'
     Assert ($manifest.version -eq '1.1.0' -and $manifest.releaseTag -eq 'v0.2.0' -and $manifest.archiveName -eq 'LimitsWidget-1.1.0-win-x64.zip') 'Invalid package-manifest.json version or archive metadata.'
-    $exeInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $limitsDir 'LimitsWidget.exe'))
+    $exePathInExtracted = Join-Path $limitsDir 'LimitsWidget.exe'
+    $exeItem = Get-Item -LiteralPath $exePathInExtracted -Force
+    $exeInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($exePathInExtracted)
     Assert ($exeInfo.ProductName -eq 'LimitsWidget') 'LimitsWidget.exe ProductName mismatch.'
     Assert ($exeInfo.FileVersion -eq '1.1.0.0' -and $manifest.executableVersion -eq '1.1.0.0') "LimitsWidget.exe version ($($exeInfo.FileVersion)) or manifest executableVersion ($($manifest.executableVersion)) is not 1.1.0.0."
     $startHere = Get-Content -LiteralPath (Join-Path $limitsDir 'START-HERE.txt') -Raw
@@ -161,15 +195,15 @@ if ($testLimits) {
     $limitsDump = Join-Path $results 'limits-widget-dump.json'
     $limitsCfgPath = Join-Path $limitsDir 'config.json'
     $limitsStatePath = Join-Path $limitsDir 'state.json'
-    $p = Start-Process -FilePath (Join-Path $limitsDir 'LimitsWidget.exe') -ArgumentList @('--config', ('"' + $limitsCfgPath + '"'), '--state', ('"' + $limitsStatePath + '"'), '--dump', ('"' + $limitsDump + '"')) -WindowStyle Hidden -PassThru -Wait
+    $p = Start-Process -FilePath $exePathInExtracted -ArgumentList @('--config', ('"' + $limitsCfgPath + '"'), '--state', ('"' + $limitsStatePath + '"'), '--dump', ('"' + $limitsDump + '"')) -WindowStyle Hidden -PassThru -Wait
     Assert ($p.ExitCode -eq 0 -and (Test-Path -LiteralPath $limitsDump)) 'Headless smoke failed: limits-widget'
     $dumpObj = Get-Content -LiteralPath $limitsDump -Raw | ConvertFrom-Json
     Assert ($null -ne $dumpObj.generatedAt -and @($dumpObj.services).Count -eq 0) 'Headless dump with all providers disabled must not query any service.'
     Assert (-not (Test-Path -LiteralPath $limitsStatePath)) 'Headless smoke wrote runtime state.json.'
 
-    # 4. Compile helper for NTFS junctions and isolated synthetic process tree tests
+    # 4. Compile helper for NTFS junctions and isolated graceful process tests
     $updaterHelperExe = Join-Path $results 'LimitsUpdaterTests.exe'
-    & (Join-Path $fw 'csc.exe') @('/nologo','/target:exe','/platform:x64','/codepage:65001','/utf8output','/main:LimitsUpdaterTests',"/out:$updaterHelperExe",(Join-Path $PSScriptRoot 'tests/LimitsUpdaterTests.cs'))
+    & (Join-Path $fw 'csc.exe') @('/nologo','/target:exe','/platform:x64','/codepage:65001','/utf8output','/main:LimitsUpdaterTests',"/r:$(Join-Path $fw 'System.Windows.Forms.dll')","/out:$updaterHelperExe",(Join-Path $PSScriptRoot 'tests/LimitsUpdaterTests.cs'))
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $updaterHelperExe)) 'LimitsUpdaterTests.exe compilation failed.'
 
     $updaterScript = Join-Path $limitsDir 'update-limits-widget.ps1'
@@ -228,7 +262,7 @@ if ($testLimits) {
     Invoke-UpdaterExpectFail @{ TargetPath = $childJunctionInstall; PackagePath = $limitsZip } 'junction inside legacy child src'
     Assert ([IO.File]::ReadAllText($outsideSentinel) -eq 'OUTSIDE_SAFE') 'Outside junction sentinel was modified.'
 
-    # 4c. Package manifest / hash tamper rejection before mutation
+    # 4c. Package manifest / hash tamper, missing SHA256SUMS, and zip directory-entry traversal rejection before mutation
     $cleanTarget = Join-Path $scratch 'tamper-check-target'
     Invoke-UpdaterExpectFail @{
         TargetPath            = $cleanTarget
@@ -236,6 +270,46 @@ if ($testLimits) {
         ExpectedPackageSha256 = ('0' * 64)
     } 'mismatched ExpectedPackageSha256'
     Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Tampered archive hash check created target directory.'
+
+    # Unauthenticated zip without SHA256SUMS.txt or -ExpectedPackageSha256 must be rejected
+    $noSumsDir = Join-Path $scratch 'no-sums-zip-dir'
+    New-Item -ItemType Directory -Path $noSumsDir -Force | Out-Null
+    $unauthZip = Join-Path $noSumsDir 'LimitsWidget-1.1.0-win-x64.zip'
+    Copy-Item -LiteralPath $limitsZip -Destination $unauthZip -Force
+    Invoke-UpdaterExpectFail @{
+        TargetPath  = $cleanTarget
+        PackagePath = $unauthZip
+    } 'zip archive without ExpectedPackageSha256 or adjacent SHA256SUMS.txt'
+    Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Unauthenticated zip check mutated target directory.'
+
+    # Zip with adjacent SHA256SUMS.txt that does not list the zip must be rejected
+    [IO.File]::WriteAllText((Join-Path $noSumsDir 'SHA256SUMS.txt'), (('0' * 64) + "  OtherArchive.zip`n"), [Text.UTF8Encoding]::new($false))
+    Invoke-UpdaterExpectFail @{
+        TargetPath  = $cleanTarget
+        PackagePath = $unauthZip
+    } 'zip archive missing from adjacent SHA256SUMS.txt'
+    Assert (-not (Test-Path -LiteralPath $cleanTarget)) 'Missing entry in SHA256SUMS.txt mutated target directory.'
+
+    # Zip containing directory-traversal entry (../../../s4-escape/) must be rejected before extraction
+    $traversalZipDir = Join-Path $scratch 'traversal-zip-dir'
+    New-Item -ItemType Directory -Path $traversalZipDir -Force | Out-Null
+    $traversalZip = Join-Path $traversalZipDir 'LimitsWidget-1.1.0-win-x64.zip'
+    Copy-Item -LiteralPath $limitsZip -Destination $traversalZip -Force
+    $zMod = [IO.Compression.ZipFile]::Open($traversalZip, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        [void]$zMod.CreateEntry('../../../s4-escape/')
+        [void]$zMod.CreateEntry('limits-widget/../../../s4-escape2/')
+    } finally {
+        $zMod.Dispose()
+    }
+    $traversalZipHash = Get-LowerSha256 $traversalZip
+    Invoke-UpdaterExpectFail @{
+        TargetPath            = $cleanTarget
+        PackagePath           = $traversalZip
+        ExpectedPackageSha256 = $traversalZipHash
+        DryRun                = $true
+    } 'zip archive with directory-traversal entry'
+    Assert (@(Get-ChildItem -LiteralPath $results -Recurse -Directory -Filter 's4-escape*' -ErrorAction SilentlyContinue).Count -eq 0) 'Directory traversal entry escaped during validation.'
 
     $tamperedPkgDir = Join-Path $scratch 'tampered-package-dir'
     Copy-Item -LiteralPath $limitsDir -Destination $tamperedPkgDir -Recurse -Force
@@ -357,52 +431,114 @@ if ($testLimits) {
         }
     }
 
-    # 4h. Exact target process & child tree termination vs foreign process preservation
+    # 4h. Abort-before-mutation when target process does not exit gracefully (zero force termination)
+    $stubbornEvt = 'Local\LimitsWidget.TestStubborn.' + [guid]::NewGuid().ToString('N')
+    $stubbornReady = Join-Path $scratch 'stubborn-ready.pid'
+    $stubbornProc = Start-Process -FilePath (Join-Path $legacyInstall 'LimitsWidget.exe') -ArgumentList @('--sleep', '20', '--ignore-close', '--stop-event', $stubbornEvt, '--ready-file', ('"' + $stubbornReady + '"')) -WindowStyle Hidden -PassThru
+    try {
+        $waitReady = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not (Test-Path -LiteralPath $stubbornReady) -and [DateTime]::UtcNow -lt $waitReady) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert (Test-Path -LiteralPath $stubbornReady) 'Stubborn fake process did not become ready.'
+        $abortReceiptPath = Join-Path $scratch 'abort-running-receipt.json'
+        Invoke-UpdaterExpectFail @{
+            TargetPath                 = $legacyInstall
+            PackagePath                = $limitsZip
+            GracefulStopTimeoutSeconds = 1
+            ReceiptPath                = $abortReceiptPath
+        } 'target process refusing graceful exit'
+        $abortReceipt = Get-Content -LiteralPath $abortReceiptPath -Raw | ConvertFrom-Json
+        Assert ($abortReceipt.status -eq 'ABORTED_PROCESS_STILL_RUNNING' -and $abortReceipt.mutatedTarget -eq $false) 'Abort-before-mutation receipt invalid.'
+        Assert (-not $stubbornProc.HasExited) 'Updater force-killed a target process that ignored graceful close!'
+        Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $oldExeHash) 'Aborted update mutated LimitsWidget.exe.'
+        Assert (Test-Path -LiteralPath (Join-Path $legacyInstall 'src/legacy-item.txt')) 'Aborted update moved legacy src.'
+    } finally {
+        Signal-GracefulEvent $stubbornEvt
+        if ($null -ne $stubbornProc) { [void]$stubbornProc.WaitForExit(5000) }
+    }
+
+    # 4i. Graceful target shutdown, active state.json writer race safety, owned child cleanup, and foreign process/browser preservation
     $foreignDir = Join-Path $scratch 'foreign-running-widget'
     New-Item -ItemType Directory -Path $foreignDir -Force | Out-Null
     $foreignExe = Join-Path $foreignDir 'LimitsWidget.exe'
     Copy-Item -LiteralPath $updaterHelperExe -Destination $foreignExe -Force
-    $ownedChildExe = Join-Path $legacyInstall 'owned-child-helper.exe'
+    $foreignBrowserDir = Join-Path $scratch 'foreign-browser-app'
+    New-Item -ItemType Directory -Path $foreignBrowserDir -Force | Out-Null
+    $foreignBrowserExe = Join-Path $foreignBrowserDir 'browser.exe'
+    Copy-Item -LiteralPath $updaterHelperExe -Destination $foreignBrowserExe -Force
+
+    $ownedChildDir = Join-Path $scratch 'owned-kimi-helper'
+    New-Item -ItemType Directory -Path $ownedChildDir -Force | Out-Null
+    $ownedChildExe = Join-Path $ownedChildDir 'owned-child-helper.exe'
     Copy-Item -LiteralPath $updaterHelperExe -Destination $ownedChildExe -Force
-    $childPidFile = Join-Path $legacyInstall 'owned-child.pid'
+    $childPidFile = Join-Path $scratch 'owned-child.pid'
+    $browserPidFile = Join-Path $scratch 'foreign-browser.pid'
+    $ownedReadyFile = Join-Path $scratch 'owned-root.pid'
+
+    $foreignStopEvt = 'Local\LimitsWidget.TestForeign.' + [guid]::NewGuid().ToString('N')
+    $browserStopEvt = 'Local\LimitsWidget.TestBrowser.' + [guid]::NewGuid().ToString('N')
+    $ownedStopEvt = 'Local\LimitsWidget.TestOwnedFallback.' + [guid]::NewGuid().ToString('N')
 
     $foreignProc = $null
     $ownedProc = $null
     $ownedChildPid = $null
+    $browserChildPid = $null
     try {
-        $foreignProc = Start-Process -FilePath $foreignExe -ArgumentList @('--sleep', '120') -WindowStyle Hidden -PassThru
-        $ownedProc = Start-Process -FilePath (Join-Path $legacyInstall 'LimitsWidget.exe') -ArgumentList @('--sleep', '120', '--spawn-child', ('"' + $ownedChildExe + '"'), ('"' + $childPidFile + '"')) -WindowStyle Hidden -PassThru
+        $foreignProc = Start-Process -FilePath $foreignExe -ArgumentList @('--sleep', '25', '--stop-event', $foreignStopEvt) -WindowStyle Hidden -PassThru
+        $ownedProc = Start-Process -FilePath (Join-Path $legacyInstall 'LimitsWidget.exe') -ArgumentList @(
+            '--sleep', '25',
+            '--stop-event', $ownedStopEvt,
+            '--ready-file', ('"' + $ownedReadyFile + '"'),
+            '--write-state', ('"' + (Join-Path $legacyInstall 'state.json') + '"'), '40',
+            '--spawn-child', ('"' + $ownedChildExe + '"'), ('"' + $childPidFile + '"'),
+            '--spawn-foreign-child', ('"' + $foreignBrowserExe + '"'), ('"' + $browserPidFile + '"'), $browserStopEvt
+        ) -WindowStyle Hidden -PassThru
+
         $waitDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (-not (Test-Path -LiteralPath $childPidFile) -and [DateTime]::UtcNow -lt $waitDeadline) {
-            Start-Sleep -Milliseconds 100
+        while ((-not (Test-Path -LiteralPath $childPidFile) -or -not (Test-Path -LiteralPath $browserPidFile) -or -not (Test-Path -LiteralPath $ownedReadyFile)) -and [DateTime]::UtcNow -lt $waitDeadline) {
+            Start-Sleep -Milliseconds 50
         }
-        Assert (Test-Path -LiteralPath $childPidFile) 'Owned child process PID file was not created.'
+        Assert ((Test-Path -LiteralPath $childPidFile) -and (Test-Path -LiteralPath $browserPidFile) -and (Test-Path -LiteralPath $ownedReadyFile)) 'Graceful fake process hierarchy did not initialize in time.'
         $ownedChildPid = [int]([IO.File]::ReadAllText($childPidFile).Trim())
+        $browserChildPid = [int]([IO.File]::ReadAllText($browserPidFile).Trim())
+        Start-Sleep -Milliseconds 250
 
         $updateReceiptPath = Join-Path $scratch 'update-receipt.json'
         & $updaterScript -TargetPath $legacyInstall -PackagePath $limitsZip -ReceiptPath $updateReceiptPath | Out-Null
-        Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $updateReceiptPath)) 'Live update on scratch legacy install failed.'
+        Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $updateReceiptPath)) 'Live graceful update on scratch legacy install failed.'
         $updateReceipt = Get-Content -LiteralPath $updateReceiptPath -Raw | ConvertFrom-Json
         Assert ($updateReceipt.status -eq 'UPDATED' -and $updateReceipt.acceptance -eq $false -and $updateReceipt.mutatedTarget -eq $true) 'Update receipt status invalid.'
-        Assert ($ownedProc.WaitForExit(5000)) 'Target LimitsWidget.exe was not stopped by updater.'
-        $childStillRunning = Get-Process -Id $ownedChildPid -ErrorAction SilentlyContinue
-        Assert ($null -eq $childStillRunning -or $childStillRunning.HasExited) 'Owned child process tree was not stopped by updater.'
-        Assert (-not $foreignProc.HasExited) 'Foreign LimitsWidget.exe in another directory was killed by updater!'
+        Assert ($ownedProc.WaitForExit(5000)) 'Target LimitsWidget.exe did not exit gracefully during update.'
+
+        $ownedChildProc = Get-Process -Id $ownedChildPid -ErrorAction SilentlyContinue
+        if ($null -ne $ownedChildProc -and -not $ownedChildProc.HasExited) {
+            [void]$ownedChildProc.WaitForExit(3000)
+        }
+        Assert ($null -eq $ownedChildProc -or $ownedChildProc.HasExited) 'Owned child process did not exit gracefully when target widget closed.'
+        Assert (-not $foreignProc.HasExited) 'Foreign LimitsWidget.exe in another directory was stopped by updater!'
+        $browserProc = Get-Process -Id $browserChildPid -ErrorAction SilentlyContinue
+        Assert ($null -ne $browserProc -and -not $browserProc.HasExited) 'External descendant application (browser.exe) outside target directory was stopped by updater!'
     } finally {
-        if ($null -ne $foreignProc -and -not $foreignProc.HasExited) { Stop-Process -Id $foreignProc.Id -Force -ErrorAction SilentlyContinue }
-        if ($null -ne $ownedProc -and -not $ownedProc.HasExited) { Stop-Process -Id $ownedProc.Id -Force -ErrorAction SilentlyContinue }
-        if ($null -ne $ownedChildPid) { Stop-Process -Id $ownedChildPid -Force -ErrorAction SilentlyContinue }
+        Signal-GracefulEvent $foreignStopEvt
+        Signal-GracefulEvent $browserStopEvt
+        Signal-GracefulEvent $ownedStopEvt
+        if ($null -ne $foreignProc) { [void]$foreignProc.WaitForExit(5000) }
+        if ($null -ne $ownedProc) { [void]$ownedProc.WaitForExit(5000) }
+        if ($null -ne $browserChildPid) {
+            $bp = Get-Process -Id $browserChildPid -ErrorAction SilentlyContinue
+            if ($null -ne $bp) { [void]$bp.WaitForExit(5000) }
+        }
     }
 
     # Verify post-update state of $legacyInstall
-    $packagedExeHash = Get-LowerSha256 (Join-Path $limitsDir 'LimitsWidget.exe')
+    $packagedExeHash = Get-LowerSha256 $exePathInExtracted
     Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $packagedExeHash) 'Updated LimitsWidget.exe hash does not match package.'
     Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'config.json')) -eq $expectedConfigHash) 'Update modified user config.json.'
-    Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'state.json')) -eq $expectedStateHash) 'Update modified user state.json.'
     $preservedCfg = Get-Content -LiteralPath (Join-Path $legacyInstall 'config.json') -Raw | ConvertFrom-Json
     Assert ($preservedCfg.customUserRootField -eq 'preserve-root-value' -and $preservedCfg.services.claude.enabled -eq $true -and $preservedCfg.services.claude.customServiceField -eq 42) 'Unknown or user fields in config.json were lost.'
     $preservedState = Get-Content -LiteralPath (Join-Path $legacyInstall 'state.json') -Raw | ConvertFrom-Json
-    Assert ($preservedState.unknownStateRootField -eq 'keep-state-root' -and $preservedState.unknownNestedObject.flag -eq $true) 'Unknown fields in state.json were lost.'
+    Assert ($preservedState.unknownStateRootField -eq 'keep-state-root' -and $preservedState.unknownNestedObject.flag -eq $true -and $preservedState.closedCleanly -eq $true) 'Unknown fields or clean shutdown state in state.json were lost.'
     Assert ([IO.File]::ReadAllText((Join-Path $legacyInstall $userNoteName)) -eq 'USER_NOTE_KEEP') 'Unknown user file was lost during update.'
 
     # Verify legacy items were safely archived rather than destroyed
@@ -411,13 +547,29 @@ if ($testLimits) {
         Assert (Test-Path -LiteralPath (Join-Path $updateReceipt.archivedLegacyPath $legacyName)) "Legacy item '$legacyName' missing from archive folder."
     }
 
-    # 4i. Explicit rollback (-RollbackFromBackup latest) verification
+    # 4j. Cross-target rollback rejection & post-update user edit preservation during explicit rollback (-RollbackFromBackup)
+    $otherTarget = Join-Path $scratch 'other-target-install'
+    New-Item -ItemType Directory -Path $otherTarget -Force | Out-Null
+    Copy-Item -LiteralPath $updaterHelperExe -Destination (Join-Path $otherTarget 'LimitsWidget.exe') -Force
+    [IO.File]::WriteAllText((Join-Path $otherTarget 'config.json'), '{"allowLocalTokens":false,"owner":"OTHER_TARGET","services":{}}', [Text.UTF8Encoding]::new($false))
+    Invoke-UpdaterExpectFail @{
+        TargetPath         = $otherTarget
+        RollbackFromBackup = $updateReceipt.backupPath
+    } 'cross-target backup rollback'
+    Assert ((Get-Content -LiteralPath (Join-Path $otherTarget 'config.json') -Raw).Contains('OTHER_TARGET')) 'Cross-target rollback modified other target config.json.'
+
+    # Simulate user editing config.json and widget updating state.json after the 1.1.0 update, then rolling back
+    $postUpdateConfigJson = $customConfigJson.Replace('preserve-root-value', 'edited-after-1.1-update')
+    [IO.File]::WriteAllText((Join-Path $legacyInstall 'config.json'), $postUpdateConfigJson, [Text.UTF8Encoding]::new($false))
+    $postUpdateConfigHash = Get-LowerSha256 (Join-Path $legacyInstall 'config.json')
+    $postUpdateStateHash = Get-LowerSha256 (Join-Path $legacyInstall 'state.json')
+
     $rollbackReceiptPath = Join-Path $scratch 'rollback-receipt.json'
     & $updaterScript -TargetPath $legacyInstall -RollbackFromBackup 'latest' -ReceiptPath $rollbackReceiptPath | Out-Null
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $rollbackReceiptPath)) 'Explicit rollback failed.'
     Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $oldExeHash) 'Explicit rollback did not restore previous LimitsWidget.exe.'
-    Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'config.json')) -eq $expectedConfigHash) 'Explicit rollback did not preserve config.json.'
-    Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'state.json')) -eq $expectedStateHash) 'Explicit rollback did not preserve state.json.'
+    Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'config.json')) -eq $postUpdateConfigHash) 'Explicit rollback clobbered post-update user edits in config.json.'
+    Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'state.json')) -eq $postUpdateStateHash) 'Explicit rollback clobbered post-update state.json.'
     foreach ($legacyName in @('src/legacy-item.txt', 'assets/legacy-item.txt', 'tools/legacy-item.txt', 'fixtures/legacy-item.txt', 'build.ps1', 'app.manifest', 'README.md', $userNoteName, 'widget.log')) {
         Assert (Test-Path -LiteralPath (Join-Path $legacyInstall $legacyName)) "Explicit rollback did not restore '$legacyName'."
     }
@@ -425,8 +577,12 @@ if ($testLimits) {
     $limitsValidationSummary = [ordered]@{
         scope                         = $Scope
         archive                       = 'LimitsWidget-1.1.0-win-x64.zip'
-        archiveSha256                 = Get-LowerSha256 $limitsZip
+        archiveSizeBytes              = [int64]$limitsZipItem.Length
+        archiveSha256                 = $limitsZipHash
+        archiveEntryCount             = 7
+        manifestTrackedFileCount      = @($manifest.files).Count
         executableSha256              = $packagedExeHash
+        executableSizeBytes           = [int64]$exeItem.Length
         executableVersion             = $exeInfo.FileVersion
         manifestVersion               = $manifest.version
         releaseTag                    = $manifest.releaseTag
@@ -434,12 +590,18 @@ if ($testLimits) {
         sanitizedDefaultConfig        = $true
         headlessDumpSmokePassed       = $true
         containmentAndJunctionGuards  = $true
+        zipTraversalRejected          = $true
         tamperRejectionBeforeMutation = $true
         isolatedExtractModeVerified   = $true
         dryRunModeVerified            = $true
-        processTreeOwnershipVerified  = $true
+        gracefulOnlyShutdownVerified  = $true
+        abortOnNonResponsiveTarget    = $true
+        stateWriterRaceSafe           = $true
         foreignProcessPreserved       = $true
+        foreignDescendantPreserved    = $true
         unknownConfigStatePreserved   = $true
+        postUpdateEditsPreserved      = $true
+        crossTargetRollbackRejected   = $true
         legacyItemsArchivedSafely     = $true
         failureInjectionRollbackPass  = @('AfterStopBeforeMutate', 'AfterArchiveLegacy', 'MidFileUpdate', 'AfterFileUpdateValidation')
         explicitRollbackVerified      = $true
@@ -450,11 +612,11 @@ if ($testLimits) {
 }
 
 $report = if ($Scope -eq 'Limits') {
-    'PASS (Limits v0.2.0): SHA256SUMS.txt; exact LimitsWidget-1.1.0-win-x64.zip allowlist; package-manifest.json and 1.1.0/1.1.0.0 version consistency; sanitized opt-in config.json/config.example.json; packaged EXE offline headless --dump smoke; updater path/root/UNC/reserved/git-checkout/unowned/NTFS-junction containment guards; manifest/hash tamper rejection before mutation; isolated -ExtractTo and -DryRun; exact target EXE + child process tree stop with foreign LimitsWidget preservation; unknown config.json/state.json field preservation; safe legacy src/build.ps1 archiving; 4-stage failure injection auto-rollback and explicit -RollbackFromBackup. No live account calls, host installation, or live runtime acceptance was performed.'
+    'PASS (Limits v0.2.0): SHA256SUMS.txt; exact 7-entry LimitsWidget-1.1.0-win-x64.zip allowlist; package-manifest.json and 1.1.0/1.1.0.0 version consistency; sanitized opt-in config.json/config.example.json; packaged EXE offline headless --dump smoke; updater path/root/UNC/reserved/git-checkout/unowned/NTFS-junction/zip-traversal containment guards; manifest/hash/unauthenticated-zip tamper rejection before mutation; isolated -ExtractTo and -DryRun; graceful-only target EXE shutdown with abort-before-mutation on non-responsive process and foreign LimitsWidget + external descendant preservation; stop-before-backup state.json writer race safety; unknown config.json/state.json and post-update user edit preservation; cross-target rollback rejection; safe legacy src/build.ps1 archiving; 4-stage failure injection auto-rollback and explicit -RollbackFromBackup. No forced process kills, live account calls, host installation, or live runtime acceptance was performed.'
 } elseif ($Scope -eq 'Resources') {
     'PASS (Resources): SHA256SUMS; portable allowlists; sanitized configs; embedded payload identity; extraction and mixed-mode refusal; read-only sensor preflight; snapshot/schema/stale/malformed contract and Windows Authz local-allow/NETWORK-deny proof; pinned native WinVerifyTrust; real helper library-load probe; synthetic network journal; installer dedicated ownership/reparse/data-preservation lifecycle; packaged EXE headless smoke.'
 } else {
-    'PASS: SHA256SUMS; portable allowlists; sanitized configs; package-manifest.json and 1.1.0 version consistency; embedded payload identity; extraction and mixed-mode refusal; read-only sensor preflight; snapshot/schema/stale/malformed contract and Windows Authz local-allow/NETWORK-deny proof; pinned native WinVerifyTrust; real helper library-load probe; synthetic network journal; installer dedicated ownership/reparse/data-preservation lifecycle; reversible limits updater containment/process-tree/legacy-archive/failure-injection/rollback lifecycle; both packaged EXEs headless smoke. No UAC, driver installation, elevated task or installed-profile lifecycle was performed by this validation.'
+    'PASS: SHA256SUMS; portable allowlists; sanitized configs; package-manifest.json and 1.1.0 version consistency; embedded payload identity; extraction and mixed-mode refusal; read-only sensor preflight; snapshot/schema/stale/malformed contract and Windows Authz local-allow/NETWORK-deny proof; pinned native WinVerifyTrust; real helper library-load probe; synthetic network journal; installer dedicated ownership/reparse/data-preservation lifecycle; reversible graceful limits updater containment/process-ownership/legacy-archive/failure-injection/rollback lifecycle; both packaged EXEs headless smoke. No forced process kills, UAC, driver installation, elevated task or installed-profile lifecycle was performed by this validation.'
 }
 [IO.File]::WriteAllText((Join-Path $results 'validation.txt'), $report, [Text.UTF8Encoding]::new($false))
 Write-Host $report
