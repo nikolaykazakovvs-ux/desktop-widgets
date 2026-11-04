@@ -32,6 +32,18 @@ namespace LimitsWidget
     static class Cli
     {
         static readonly string[] Exts = { ".exe", ".cmd", ".bat" };
+        const string UserEnvKey = "Environment", MachineEnvKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+        static readonly TimeSpan MissRetry = TimeSpan.FromMinutes(5);
+
+        // Кэш поиска CLI: каталоги PATH и найденные пути пересчитываются, когда меняется PATH процесса или PATH в реестре
+        // (установка/удаление CLI), ненайденный CLI перепроверяется не чаще раза в 5 минут; путь из config.json не кэшируется.
+        static readonly object ResolveGate = new object();
+        static string cachedEnvKey;
+        static List<string> cachedDirs;
+        static readonly Dictionary<string, KeyValuePair<string, DateTime>> resolved = new Dictionary<string, KeyValuePair<string, DateTime>>(StringComparer.OrdinalIgnoreCase);
+        static int searches;
+
+        internal static int SearchCount { get { return searches; } }   // для тестов: сколько раз реально обходились каталоги
 
         public static string Resolve(string configured, string name)
         {
@@ -40,13 +52,65 @@ namespace LimitsWidget
                 string p = Environment.ExpandEnvironmentVariables(configured.Trim().Trim('"'));
                 return File.Exists(p) ? p : null;
             }
-            foreach (var dir in SearchDirs())
-                foreach (var ext in Exts)
+            lock (ResolveGate)
+            {
+                var dirs = DirsLocked();
+                KeyValuePair<string, DateTime> hit;
+                if (resolved.TryGetValue(name, out hit))
                 {
-                    string p = Path.Combine(dir, name + ext);
-                    if (File.Exists(p)) return p;
+                    if (hit.Key != null && File.Exists(hit.Key)) return hit.Key;
+                    if (hit.Key == null && DateTime.UtcNow - hit.Value < MissRetry) return null;
                 }
-            return null;
+                searches++;
+                string found = null;
+                foreach (var dir in dirs)
+                {
+                    foreach (var ext in Exts)
+                    {
+                        string p = Path.Combine(dir, name + ext);
+                        if (File.Exists(p)) { found = p; break; }
+                    }
+                    if (found != null) break;
+                }
+                resolved[name] = new KeyValuePair<string, DateTime>(found, DateTime.UtcNow);
+                return found;
+            }
+        }
+
+        static string EnvKey()
+        {
+            return (Environment.GetEnvironmentVariable("PATH") ?? "") + "\n" + RegistryRaw(Registry.CurrentUser, UserEnvKey)
+                + "\n" + RegistryRaw(Registry.LocalMachine, MachineEnvKey);
+        }
+
+        static List<string> DirsLocked()
+        {
+            string key = EnvKey();
+            if (cachedDirs == null || key != cachedEnvKey)
+            {
+                cachedDirs = SearchDirs();
+                cachedEnvKey = key;
+                resolved.Clear();
+            }
+            return cachedDirs;
+        }
+
+        static List<string> Dirs()
+        {
+            lock (ResolveGate) return new List<string>(DirsLocked());
+        }
+
+        static string RegistryRaw(RegistryKey hive, string sub)
+        {
+            try
+            {
+                using (var k = hive.OpenSubKey(sub))
+                    return k == null ? "" : (k.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "");
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         // PATH процесса + пользовательский и системный PATH из реестра: виджет мог быть запущен со старым окружением.
@@ -56,8 +120,8 @@ namespace LimitsWidget
             var result = new List<string>();
             var parts = new List<string>();
             parts.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'));
-            parts.AddRange(RegistryPath(Registry.CurrentUser, "Environment"));
-            parts.AddRange(RegistryPath(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"));
+            parts.AddRange(RegistryPath(Registry.CurrentUser, UserEnvKey));
+            parts.AddRange(RegistryPath(Registry.LocalMachine, MachineEnvKey));
             foreach (var raw in parts)
             {
                 string d = Environment.ExpandEnvironmentVariables(raw.Trim().Trim('"'));
@@ -108,7 +172,7 @@ namespace LimitsWidget
             psi.StandardOutputEncoding = new UTF8Encoding(false);
             psi.StandardErrorEncoding = new UTF8Encoding(false);
             psi.WorkingDirectory = WorkDir();
-            psi.EnvironmentVariables["PATH"] = string.Join(";", SearchDirs());
+            psi.EnvironmentVariables["PATH"] = string.Join(";", Dirs());
             psi.EnvironmentVariables["NO_COLOR"] = "1";
             return psi;
         }
@@ -230,6 +294,37 @@ namespace LimitsWidget
             static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
             [DllImport("kernel32.dll", SetLastError = true)]
             static extern bool CloseHandle(IntPtr handle);
+            [DllImport("kernel32.dll", SetLastError = true)]
+            static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+            [DllImport("kernel32.dll", SetLastError = true)]
+            static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+            [DllImport("kernel32.dll", SetLastError = true)]
+            static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+            const uint ProcessQueryLimitedInformation = 0x1000;
+
+            // Процесс pid входит в этот Job — значит, его запустил виджет (или потомок запущенного им процесса).
+            public static bool Contains(IntPtr job, int pid)
+            {
+                if (job == IntPtr.Zero || pid <= 0) return false;
+                IntPtr h = OpenProcess(ProcessQueryLimitedInformation, false, pid);
+                if (h == IntPtr.Zero) return false;
+                try
+                {
+                    bool inJob;
+                    return IsProcessInJob(h, job, out inJob) && inJob;
+                }
+                finally
+                {
+                    CloseHandle(h);
+                }
+            }
+
+            // Завершить всё дерево процессов Job (только своё: в Job попадают лишь запущенный виджетом процесс и его потомки).
+            public static void Terminate(IntPtr job)
+            {
+                if (job != IntPtr.Zero && !TerminateJobObject(job, 1))
+                    Log.Write("job: TerminateJobObject failed, error " + Marshal.GetLastWin32Error());
+            }
 
             public static IntPtr Create(int maxProcesses)
             {

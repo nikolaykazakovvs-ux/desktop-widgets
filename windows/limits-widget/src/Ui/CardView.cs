@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -24,6 +25,8 @@ namespace LimitsWidget
         public bool Pinned;
         public Action<string, Border, MouseButtonEventArgs> BeginDrag;   // ручка карточки нажата: id, карточка; null — ручек нет (headless)
         public Action<string, int> MoveCard;                             // id, −1 выше / +1 ниже (меню ручки)
+        public Action ToggleActivity;   // развернуть / свернуть подробную статистику Codex
+        public bool ActivityExpanded;
     }
 
     // Строит визуальное дерево карточки из снимков; перестраивается целиком при каждом обновлении.
@@ -46,6 +49,7 @@ namespace LimitsWidget
             root.Background = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
             root.Margin = new Thickness(14, 10, 14, 18);   // запас под тени карточек
             root.Resources["LW.Hover"] = t.Hover;
+            root.Resources["LW.Focus"] = t.Focus;
             TextElement.SetForeground(root, t.Text);
             TextElement.SetFontFamily(root, UiFont);
             TextOptions.SetTextFormattingMode(root, TextFormattingMode.Display);
@@ -242,21 +246,29 @@ namespace LimitsWidget
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.Children.Add(Badge(s.Id, t));
 
-            var title = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 8, 0) };
-            title.Children.Add(new TextBlock { Text = s.Title ?? s.Id, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = t.Text, VerticalAlignment = VerticalAlignment.Center });
-            if (!string.IsNullOrEmpty(s.Plan))
+            // Шапка: значок · имя (сжимается с многоточием) · тариф · профиль/подписка · страница лимитов · статус/время
+            var title = new ShrinkFirstPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 8, 0) };
+            string name = s.Title ?? s.Id;
+            title.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = t.Text, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = name });
+            title.Children.Add(PlanChip(s, t));
+            if (act.OpenUrl != null)
             {
-                var chip = new Border { Background = t.ChipBg, CornerRadius = new CornerRadius(4), Padding = new Thickness(5, 0, 5, 1), Margin = new Thickness(7, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-                chip.Child = new TextBlock { Text = s.Plan, FontSize = 9.5, FontWeight = FontWeights.SemiBold, Foreground = t.ChipText };
-                title.Children.Add(chip);
-            }
-            if (!string.IsNullOrEmpty(s.Url) && act.OpenUrl != null)
-            {
-                string url = s.Url;
-                var open = IconButton("", "Открыть страницу лимитов", t, 20, 9.5);
-                open.Margin = new Thickness(3, 1, 0, 0);
-                open.Click += (o, e) => act.OpenUrl(url);
-                title.Children.Add(open);
+                if (!string.IsNullOrEmpty(s.ProfileUrl))
+                {
+                    string profile = s.ProfileUrl;
+                    var prof = IconButton("", "Профиль и подписка " + name + " (откроется " + HostOf(profile) + ")", t, 20, 9.5);
+                    prof.Margin = new Thickness(3, 1, 0, 0);
+                    prof.Click += (o, e) => act.OpenUrl(profile);
+                    title.Children.Add(prof);
+                }
+                if (!string.IsNullOrEmpty(s.Url))
+                {
+                    string url = s.Url;
+                    var open = IconButton("", "Страница лимитов " + name + " (откроется " + HostOf(url) + ")", t, 20, 9.5);
+                    open.Margin = new Thickness(1, 1, 0, 0);
+                    open.Click += (o, e) => act.OpenUrl(url);
+                    title.Children.Add(open);
+                }
             }
             Grid.SetColumn(title, 1);
             head.Children.Add(title);
@@ -265,6 +277,7 @@ namespace LimitsWidget
             status.Children.Add(new Ellipse { Width = 6, Height = 6, Fill = new SolidColorBrush(StatusColor(s.Status, t)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 5, 0) });
             status.Children.Add(new TextBlock { Text = s.StatusText ?? "", FontSize = 10.5, Foreground = t.Muted, VerticalAlignment = VerticalAlignment.Center });
             status.ToolTip = StatusTip(s, now);
+            System.Windows.Automation.AutomationProperties.SetName(status, "Состояние: " + (s.StatusText ?? ""));
             Grid.SetColumn(status, 2);
             head.Children.Add(status);
             panel.Children.Add(head);
@@ -275,6 +288,12 @@ namespace LimitsWidget
             {
                 var tile = ExtraTile(extras[i], t, compact);
                 tile.Margin = new Thickness(0, i == 0 ? (compact ? 8 : 11) : (compact ? 5 : 6), 0, 0);
+                panel.Children.Add(tile);
+            }
+            if (s.Activity != null)
+            {
+                var tile = ActivityTile(s.Activity, t, now, act, compact);
+                tile.Margin = new Thickness(0, extras.Count == 0 ? (compact ? 8 : 11) : (compact ? 5 : 6), 0, 0);
                 panel.Children.Add(tile);
             }
             if (!compact)
@@ -321,8 +340,161 @@ namespace LimitsWidget
         {
             var list = new List<ExtraItem>();
             foreach (var x in s.Extras)
-                if (!x.ExpiresAt.HasValue || x.ExpiresAt.Value > now) list.Add(x);
+                if (!x.ExpiresAt.HasValue || !Fmt.NotAfter(x.ExpiresAt.Value, now)) list.Add(x);
             return list;
+        }
+
+        static string HostOf(string url)
+        {
+            Uri u;
+            return Uri.TryCreate(url, UriKind.Absolute, out u) ? u.Host : url;
+        }
+
+        // Тариф: ручной — обычный чип; автоматический — чип с пометкой «авто»; неизвестный — приглушённый контур.
+        // Источник — в подсказке; изменить — меню → «Подписки…».
+        static FrameworkElement PlanChip(ServiceSnapshot s, Theme t)
+        {
+            bool known = !string.IsNullOrEmpty(s.Plan);
+            var chip = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(5, 0, 5, 1), Margin = new Thickness(7, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            var text = new TextBlock { FontSize = 9.5, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 96 };
+            if (known)
+            {
+                chip.Background = t.ChipBg;
+                text.Text = s.Plan + (s.PlanSource == "provider" ? Fmt.Nbsp + "·" + Fmt.Nbsp + "авто" : "");
+                text.Foreground = t.ChipText;
+            }
+            else
+            {
+                chip.BorderBrush = t.ChipBg;
+                chip.BorderThickness = new Thickness(1);
+                text.Text = "тариф?";
+                text.Foreground = t.Muted;
+            }
+            chip.Child = text;
+            chip.ToolTip = PlanResolver.Describe(s);
+            System.Windows.Automation.AutomationProperties.SetName(chip, "Тариф: " + (known ? s.Plan : "неизвестен"));
+            return chip;
+        }
+
+        // Статистика Codex: 7 дней по дням и сумма, подробности раскрываются кнопкой. Время — своё (не время квот).
+        static FrameworkElement ActivityTile(TokenActivity a, Theme t, DateTime now, CardActions act, bool compact)
+        {
+            Color accent = t.Info;
+            var tile = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Padding = compact ? new Thickness(9, 5, 9, 6) : new Thickness(10, 7, 10, 8),
+                Background = new SolidColorBrush(Color.FromArgb(t.Dark ? (byte)0x1A : (byte)0x10, accent.R, accent.G, accent.B)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(t.Dark ? (byte)0x40 : (byte)0x30, accent.R, accent.G, accent.B)),
+                BorderThickness = new Thickness(1)
+            };
+            var stack = new StackPanel();
+            var week = a.LastWeek(Fmt.Local(now).Date);
+            long? total = null;
+            if (week != null) foreach (var d in week) if (d.Tokens.HasValue) total = (total ?? 0) + d.Tokens.Value;
+
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 14, Foreground = new SolidColorBrush(accent), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            var label = new TextBlock { Text = "Активность Codex · 7 дней", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = t.Text, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            Grid.SetColumn(label, 1);
+            row.Children.Add(label);
+            var value = new TextBlock { Text = total.HasValue ? Fmt.Tokens(total.Value) : "—", FontFamily = DisplayFont, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = total.HasValue ? t.Text : t.Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+            value.ToolTip = total.HasValue ? CreditStats.Number(total.Value) + " токенов за известные дни недели" : "Дневных значений нет";
+            Grid.SetColumn(value, 2);
+            row.Children.Add(value);
+            stack.Children.Add(row);
+
+            if (week != null) stack.Children.Add(WeekChart(week, t, accent));
+
+            string when = a.MeasuredAt.HasValue ? "данные " + Fmt.When(a.MeasuredAt.Value, now) : "время неизвестно";
+            if (a.Stale) when += " · последний запрос статистики не удался";
+            var details = new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>("Всего токенов", a.LifetimeTokens.HasValue ? CreditStats.Number(a.LifetimeTokens.Value) : "—"),
+                new KeyValuePair<string, string>("Пик за день", a.PeakDailyTokens.HasValue ? CreditStats.Number(a.PeakDailyTokens.Value) : "—"),
+                new KeyValuePair<string, string>("Серия сейчас", a.CurrentStreakDays.HasValue ? a.CurrentStreakDays.Value + Fmt.Nbsp + "дн." : "—"),
+                new KeyValuePair<string, string>("Самая длинная серия", a.LongestStreakDays.HasValue ? a.LongestStreakDays.Value + Fmt.Nbsp + "дн." : "—"),
+                new KeyValuePair<string, string>("Самый долгий ход", a.LongestRunningTurnSec.HasValue ? Fmt.Duration(a.LongestRunningTurnSec.Value) : "—")
+            };
+
+            if (compact)
+            {
+                tile.ToolTip = when + "\n" + string.Join("\n", details.Select(kv => kv.Key + ": " + kv.Value));
+            }
+            else
+            {
+                var foot = new Grid { Margin = new Thickness(22, 4, 0, 0) };
+                foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                foot.Children.Add(new TextBlock { Text = when, FontSize = 10.5, Foreground = a.Stale ? new SolidColorBrush(t.Warn) : (Brush)t.Text2, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
+                if (act.ToggleActivity != null)
+                {
+                    var toggle = new Button { Style = IconButtonStyle(), Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
+                    toggle.Content = new TextBlock { Text = act.ActivityExpanded ? "Свернуть" : "Подробнее", FontSize = 10.5, Foreground = new SolidColorBrush(accent) };
+                    string tipText = act.ActivityExpanded ? "Свернуть подробную статистику Codex" : "Показать подробную статистику Codex";
+                    toggle.ToolTip = tipText;
+                    System.Windows.Automation.AutomationProperties.SetName(toggle, tipText);
+                    toggle.Click += (o, e) => act.ToggleActivity();
+                    Grid.SetColumn(toggle, 1);
+                    foot.Children.Add(toggle);
+                }
+                stack.Children.Add(foot);
+                if (act.ActivityExpanded || act.ToggleActivity == null)
+                {
+                    var grid = new Grid { Margin = new Thickness(22, 4, 0, 0) };
+                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    for (int i = 0; i < details.Count; i++)
+                    {
+                        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        var k = new TextBlock { Text = details[i].Key, FontSize = 10.5, Foreground = t.Text2, Margin = new Thickness(0, 1, 0, 1) };
+                        var v = new TextBlock { Text = details[i].Value, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = details[i].Value == "—" ? t.Muted : t.Text, Margin = new Thickness(8, 1, 0, 1) };
+                        Typography.SetNumeralAlignment(v, FontNumeralAlignment.Tabular);
+                        Grid.SetRow(k, i);
+                        Grid.SetRow(v, i);
+                        Grid.SetColumn(v, 1);
+                        grid.Children.Add(k);
+                        grid.Children.Add(v);
+                    }
+                    stack.Children.Add(grid);
+                }
+                tile.ToolTip = "Статистика использования Codex по всему аккаунту (account/usage/read). Отдельна от лимитов тарифа; пропущенный день — нет данных, а не ноль.";
+            }
+            tile.Child = stack;
+            return tile;
+        }
+
+        // Семь столбиков по дням; день без значения — пустое место с чёрточкой (не нулевой столбик).
+        static FrameworkElement WeekChart(List<DailyTokens> week, Theme t, Color accent)
+        {
+            long max = 0;
+            foreach (var d in week) if (d.Tokens.HasValue && d.Tokens.Value > max) max = d.Tokens.Value;
+            var g = new Grid { Height = 26, Margin = new Thickness(22, 6, 0, 0) };
+            var ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+            for (int i = 0; i < week.Count; i++)
+            {
+                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var d = week[i];
+                var cell = new Grid { Margin = new Thickness(1.5, 0, 1.5, 0), Background = Brushes.Transparent };
+                string day = d.Date.ToString("ddd dd.MM", ru);
+                if (d.Tokens.HasValue)
+                {
+                    double h = max > 0 ? Math.Max(2, 26.0 * d.Tokens.Value / max) : 2;
+                    cell.Children.Add(new Border { Height = h, VerticalAlignment = VerticalAlignment.Bottom, CornerRadius = new CornerRadius(2), Background = new SolidColorBrush(d.Tokens.Value > 0 ? accent : ((SolidColorBrush)t.Track).Color) });
+                    cell.ToolTip = day + ": " + CreditStats.Number(d.Tokens.Value) + " токенов";
+                }
+                else
+                {
+                    cell.Children.Add(new Border { Height = 1.5, VerticalAlignment = VerticalAlignment.Bottom, Background = t.Muted, Opacity = 0.6 });
+                    cell.ToolTip = day + ": нет данных";
+                }
+                Grid.SetColumn(cell, i);
+                g.Children.Add(cell);
+            }
+            return g;
         }
 
         static Border ExtraTile(ExtraItem e, Theme t, bool compact)
@@ -466,7 +638,7 @@ namespace LimitsWidget
             string tip = compact && !string.IsNullOrEmpty(cap) ? cap + (string.IsNullOrEmpty(b.Tip) ? "" : "\n" + b.Tip) : b.Tip;
             if (!string.IsNullOrEmpty(tip)) panel.ToolTip = tip;
             double? used = b.Used;
-            bool reset = b.ResetsAt.HasValue && b.ResetsAt.Value <= now;
+            bool reset = b.ResetsAt.HasValue && Fmt.NotAfter(b.ResetsAt.Value, now);
             if (used.HasValue && reset) used = 0;   // окно уже сброшено, свежего опроса ещё не было
 
             var row = new Grid();
@@ -575,7 +747,8 @@ namespace LimitsWidget
             string text = null;
             if (!b.Placeholder && b.ResetsAt.HasValue)
             {
-                DateTime at = b.ResetsAt.Value;
+                DateTime at = Fmt.Local(b.ResetsAt.Value);
+                now = Fmt.Local(now);
                 text = at <= now ? "сброшено " + Fmt.When(at, now) : "сброс " + Fmt.When(at, now) + " · через " + Fmt.Span(at - now);
             }
             if (!string.IsNullOrEmpty(b.Note)) text = string.IsNullOrEmpty(text) ? b.Note : text + " · " + b.Note;
@@ -599,11 +772,16 @@ namespace LimitsWidget
             }
         }
 
-        static string StatusTip(ServiceSnapshot s, DateTime now)
+        // Время хранится в UTC, показывается местным — одинаково для свежего снимка и снимка из кэша.
+        internal static string StatusTip(ServiceSnapshot s, DateTime now)
         {
             string tip = "Источник: " + (s.Source ?? "—");
             if (s.DataTime.HasValue) tip += "\nДанные на " + Fmt.When(s.DataTime.Value, now);
+            else if (s.ObservationTimeUnknown && (s.Status == SvcStatus.Ok || s.Status == SvcStatus.Fixture || s.Status == SvcStatus.Stale))
+                tip += "\nВремя наблюдения неизвестно: источник не сообщает, когда получены эти значения";
+            if (s.LastAttemptAt.HasValue) tip += "\nПоследний опрос " + Fmt.When(s.LastAttemptAt.Value, now);
             if (s.Status == SvcStatus.Stale) tip += "\nПоследний опрос не удался — показан прошлый снимок";
+            if (s.Partial) tip += "\nДополнительные сведения ещё загружаются";
             return tip;
         }
 
@@ -678,15 +856,19 @@ namespace LimitsWidget
             const string xaml =
 @"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Button'>
   <Setter Property='BorderThickness' Value='0'/>
-  <Setter Property='Focusable' Value='False'/>
+  <Setter Property='Focusable' Value='True'/>
+  <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
   <Setter Property='Cursor' Value='Hand'/>
   <Setter Property='Template'>
     <Setter.Value>
       <ControlTemplate TargetType='Button'>
-        <Border x:Name='bd' Background='{TemplateBinding Background}' CornerRadius='7' Padding='{TemplateBinding Padding}'>
+        <Border x:Name='bd' Background='{TemplateBinding Background}' BorderBrush='Transparent' BorderThickness='1.5' CornerRadius='7' Padding='{TemplateBinding Padding}'>
           <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
         </Border>
         <ControlTemplate.Triggers>
+          <Trigger Property='IsKeyboardFocused' Value='True'>
+            <Setter TargetName='bd' Property='BorderBrush' Value='{DynamicResource LW.Focus}'/>
+          </Trigger>
           <Trigger Property='IsMouseOver' Value='True'>
             <Setter TargetName='bd' Property='Opacity' Value='0.88'/>
           </Trigger>
@@ -702,6 +884,7 @@ namespace LimitsWidget
             return pillButtonStyle;
         }
 
+        // Кнопки-значки доступны с клавиатуры (Tab, Enter/Пробел) и показывают рамку фокуса.
         static Style IconButtonStyle()
         {
             if (iconButtonStyle != null) return iconButtonStyle;
@@ -709,17 +892,22 @@ namespace LimitsWidget
 @"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Button'>
   <Setter Property='Background' Value='Transparent'/>
   <Setter Property='BorderThickness' Value='0'/>
-  <Setter Property='Focusable' Value='False'/>
+  <Setter Property='Focusable' Value='True'/>
+  <Setter Property='IsTabStop' Value='True'/>
+  <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
   <Setter Property='Cursor' Value='Hand'/>
   <Setter Property='Template'>
     <Setter.Value>
       <ControlTemplate TargetType='Button'>
-        <Border x:Name='bd' Background='{TemplateBinding Background}' CornerRadius='6' Padding='{TemplateBinding Padding}'>
+        <Border x:Name='bd' Background='{TemplateBinding Background}' BorderBrush='Transparent' BorderThickness='1.5' CornerRadius='6' Padding='{TemplateBinding Padding}'>
           <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
         </Border>
         <ControlTemplate.Triggers>
           <Trigger Property='IsMouseOver' Value='True'>
             <Setter TargetName='bd' Property='Background' Value='{DynamicResource LW.Hover}'/>
+          </Trigger>
+          <Trigger Property='IsKeyboardFocused' Value='True'>
+            <Setter TargetName='bd' Property='BorderBrush' Value='{DynamicResource LW.Focus}'/>
           </Trigger>
           <Trigger Property='IsPressed' Value='True'>
             <Setter TargetName='bd' Property='Opacity' Value='0.6'/>
@@ -734,6 +922,48 @@ namespace LimitsWidget
 </Style>";
             iconButtonStyle = (Style)XamlReader.Parse(xaml);
             return iconButtonStyle;
+        }
+    }
+
+    // Строка шапки: первый элемент (имя сервиса) получает остаток ширины и сжимается с многоточием,
+    // остальные (тариф, ссылки) стоят сразу за ним в натуральную ширину — как в прежней раскладке.
+    sealed class ShrinkFirstPanel : Panel
+    {
+        protected override Size MeasureOverride(Size available)
+        {
+            double rest = 0, height = 0;
+            for (int i = 1; i < InternalChildren.Count; i++)
+            {
+                var c = InternalChildren[i];
+                c.Measure(new Size(double.PositiveInfinity, available.Height));
+                rest += c.DesiredSize.Width;
+                height = Math.Max(height, c.DesiredSize.Height);
+            }
+            double first = 0;
+            if (InternalChildren.Count > 0)
+            {
+                double room = double.IsInfinity(available.Width) ? double.PositiveInfinity : Math.Max(0, available.Width - rest);
+                InternalChildren[0].Measure(new Size(room, available.Height));
+                first = Math.Min(InternalChildren[0].DesiredSize.Width, room);
+                height = Math.Max(height, InternalChildren[0].DesiredSize.Height);
+            }
+            return new Size(first + rest, height);
+        }
+
+        protected override Size ArrangeOverride(Size final)
+        {
+            double rest = 0;
+            for (int i = 1; i < InternalChildren.Count; i++) rest += InternalChildren[i].DesiredSize.Width;
+            double x = 0;
+            for (int i = 0; i < InternalChildren.Count; i++)
+            {
+                var c = InternalChildren[i];
+                double w = i == 0 ? Math.Max(0, Math.Min(c.DesiredSize.Width, final.Width - rest)) : c.DesiredSize.Width;
+                double h = Math.Min(final.Height, c.DesiredSize.Height);
+                c.Arrange(new Rect(x, (final.Height - h) / 2, w, h));
+                x += w;
+            }
+            return final;
         }
     }
 }

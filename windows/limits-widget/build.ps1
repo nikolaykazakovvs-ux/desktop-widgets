@@ -1,4 +1,4 @@
-<#
+﻿<#
   Сборка LimitsWidget.exe встроенным компилятором .NET Framework 4.x (csc.exe, C# 5).
   .NET SDK не нужен. Запуск:  powershell -ExecutionPolicy Bypass -File .\build.ps1
 #>

@@ -2,7 +2,9 @@ param([Parameter(Mandatory=$true)][string]$OutDir)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $full = [IO.Path]::GetFullPath($OutDir)
-if (-not $full.StartsWith('D:\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Use isolated output on D:' }
+# Isolated output only: absolute, outside widget sources, never an installed widget directory.
+if (-not [IO.Path]::IsPathRooted($OutDir)) { throw 'OutDir must be absolute' }
+if ($full.StartsWith((Join-Path $repo 'windows'), [StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath (Join-Path $full 'LimitsWidget.exe'))) { throw 'Use an isolated output directory' }
 New-Item -ItemType Directory -Force -Path $full | Out-Null
 $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $refs = @('System.dll','System.Core.dll','System.Xml.dll','System.Xaml.dll','System.Web.Extensions.dll','System.Drawing.dll','System.Windows.Forms.dll') | ForEach-Object { Join-Path $fw $_ }

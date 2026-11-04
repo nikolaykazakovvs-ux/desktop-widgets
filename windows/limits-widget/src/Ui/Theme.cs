@@ -8,7 +8,7 @@ namespace LimitsWidget
     sealed class Theme
     {
         public bool Dark;
-        public SolidColorBrush CardBg, CardBorder, Text, Text2, Muted, Track, Separator, ChipBg, ChipText, Hover, MenuBg;
+        public SolidColorBrush CardBg, CardBorder, Text, Text2, Muted, Track, Separator, ChipBg, ChipText, Hover, MenuBg, Focus;
         public Color Ok, Warn, Danger, Info;
 
         public static Theme Resolve(string mode)
@@ -51,6 +51,7 @@ namespace LimitsWidget
             t.Warn = C("#FFE3B341");
             t.Danger = C("#FFF85149");
             t.Info = C("#FF7C8CFF");
+            t.Focus = B("#FF9AA6FF");
             return t;
         }
 
@@ -72,6 +73,7 @@ namespace LimitsWidget
             t.Warn = C("#FFC98500");
             t.Danger = C("#FFD1242F");
             t.Info = C("#FF4F5BD5");
+            t.Focus = B("#FF3B47C4");
             return t;
         }
 

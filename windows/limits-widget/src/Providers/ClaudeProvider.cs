@@ -245,13 +245,33 @@ namespace LimitsWidget
             var w = Json.Get(rl, key);
             if (Json.Obj(w) == null) return null;
             var bar = new LimitBar { Chip = chip, Label = label };
-            double? u = Util(rl, key);
-            bar.Used = u ?? 0;
-            var pool = key == "five_hour" || key == "seven_day" ? "subscription.general" : key == "seven_day_opus" ? "subscription.opus" : key == "seven_day_sonnet" ? "subscription.sonnet" : key == "seven_day_cowork" ? "subscription.cowork" : key == "seven_day_oauth_apps" ? "subscription.oauth_apps" : null;
-            bar.Quota = QuotaObservation.Create("claude", pool, key == "five_hour" ? "five_hour" : "seven_day", key == "five_hour" ? 18000 : 604800, u, Json.Time(Json.Get(w, "resets_at")));
+            double? u = ValidPercent(Util(rl, key));
+            // нет процента — расход неизвестен (не ноль)
+            bar.Used = u;
+            bar.Quota = QuotaObservation.Create("claude", PoolOf(key), key == "five_hour" ? "five_hour" : "seven_day", key == "five_hour" ? 18000 : 604800, u, Json.Time(Json.Get(w, "resets_at")));
             bar.ResetsAt = Json.Time(Json.Get(w, "resets_at"));
-            if (!u.HasValue) bar.Note = "окно не открыто";
+            if (!u.HasValue) bar.Note = bar.ResetsAt.HasValue ? "нет данных о расходе" : "окно не открыто";
             return bar;
+        }
+
+        // Подтверждённые ключи ответа get_usage → типизированный пул; прочие — только в UI.
+        static string PoolOf(string key)
+        {
+            switch (key)
+            {
+                case "five_hour": case "seven_day": return "subscription.general";
+                case "seven_day_opus": return "subscription.opus";
+                case "seven_day_sonnet": return "subscription.sonnet";
+                case "seven_day_cowork": return "subscription.cowork";
+                case "seven_day_oauth_apps": return "subscription.oauth_apps";
+                default: return null;
+            }
+        }
+
+        static double? ValidPercent(double? v)
+        {
+            if (!v.HasValue || double.IsNaN(v.Value) || double.IsInfinity(v.Value) || v.Value < 0) return null;
+            return v;
         }
 
         // Разбор ответа get_usage; false — нет rate_limits (тогда snap не тронут).
@@ -281,6 +301,8 @@ namespace LimitsWidget
                 var b = WindowBar(rl, s[0], chip7, s[1], ctx.Now);
                 if (b != null) bars.Add(b);
             }
+            // Модельные недельные окна: имя модели — маркетинговая подпись, не идентификатор. Типизированный пул назначается
+            // только по подтверждённому ключу окна (как у seven_day_*), иначе окно остаётся в UI без квоты телеметрии.
             var ms = Json.Arr(Json.Get(rl, "model_scoped"));
             if (ms != null)
                 foreach (var m in ms)
@@ -289,12 +311,14 @@ namespace LimitsWidget
                     if (string.IsNullOrEmpty(name)) continue;
                     string label = "Неделя · " + name;
                     if (bars.Any(x => x.Label == label)) continue;
-                    bars.Add(new LimitBar
-                    {
-                        Chip = chip7, Label = label,
-                        Used = Json.Num(Json.Get(m, "utilization")) ?? 0,
-                        ResetsAt = Json.Time(Json.Get(m, "resets_at"))
-                    });
+                    double? u = ValidPercent(Json.Num(Json.Get(m, "utilization")));
+                    var bar = new LimitBar { Chip = chip7, Label = label, Used = u, ResetsAt = Json.Time(Json.Get(m, "resets_at")) };
+                    string key = Json.Str(Json.Get(m, "key")) ?? Json.Str(Json.Get(m, "id"));
+                    string pool = key != null && key.StartsWith("seven_day_", StringComparison.Ordinal) ? PoolOf(key) : null;
+                    bar.Quota = QuotaObservation.Create("claude", pool, "seven_day", 604800, u, bar.ResetsAt);
+                    bar.Tip = "Недельный лимит модели " + name + (pool == null ? ". Ответ не указывает подтверждённый идентификатор пула — окно показано только здесь." : ".");
+                    if (!u.HasValue) bar.Note = "нет данных о расходе";
+                    bars.Add(bar);
                 }
             if (bars.Count == 0) return false;
             snap.Bars.AddRange(bars);
@@ -481,8 +505,9 @@ namespace LimitsWidget
                     snap.Bars.Add(new LimitBar { Chip = "5" + Fmt.Nbsp + "ч", Label = "Сессия · окно 5 часов", Used = fh.Value });
                 if (sd.HasValue)
                     snap.Bars.Add(new LimitBar { Chip = "7" + Fmt.Nbsp + "д", Label = "Неделя · все модели", Used = sd.Value });
-                snap.DataTime = t;
-                snap.ObservationTimeUnknown = true;
+                // у записи приложения есть исходное время sample.t — оно и есть время наблюдения
+                snap.DataTime = Fmt.Utc(t.Value);
+                snap.ObservationTimeUnknown = false;
                 for (int i = 0; i < snap.Bars.Count; i++)
                 {
                     var bar = snap.Bars[i];
@@ -534,16 +559,18 @@ namespace LimitsWidget
             string s = TrailingZone.Replace(raw, "").Replace(" at ", " ").Trim();
             s = AmPm.Replace(s, m => m.Groups[1].Value + m.Groups[2].Value.ToUpperInvariant());
             DateTime dt;
+            now = Fmt.Local(now);
+            // строка /usage — местное время машины: Kind = Local, чтобы UTC-хранение и показ не сдвигали его
             if (DateTime.TryParseExact(s, DateFormats, En, DateTimeStyles.AllowWhiteSpaces, out dt))
             {
                 if (dt < now.AddDays(-180)) dt = dt.AddYears(1);
-                return dt;
+                return DateTime.SpecifyKind(dt, DateTimeKind.Local);
             }
             if (DateTime.TryParseExact(s, TimeFormats, En, DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.NoCurrentDateDefault, out dt))
             {
                 DateTime t = now.Date + dt.TimeOfDay;
                 if (t < now.AddMinutes(-1)) t = t.AddDays(1);
-                return t;
+                return DateTime.SpecifyKind(t, DateTimeKind.Local);
             }
             return null;
         }

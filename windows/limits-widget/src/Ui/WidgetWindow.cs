@@ -82,9 +82,13 @@ namespace LimitsWidget
             // после ухода фокуса возвращать его некуда: Windows сама активирует окно, где пользователь работал
             Deactivated += (s, e) => { deactivatedAt = DateTime.UtcNow; previousForeground = IntPtr.Zero; };
             Closing += (s, e) => SavePosition();
+            // скрытая карточка не перестраивается; при показе — сразу свежая отрисовка
+            IsVisibleChanged += (s, e) => { if (IsVisible) Render(); };
             Closed += (s, e) =>
             {
                 timer.Stop();
+                // свой скрытый сервер Kimi завершается вместе с виджетом (не при сворачивании в трей)
+                KimiServerManager.Shared.Dispose();
                 if (telemetry != null) telemetry.Dispose();
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
                 SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
@@ -138,7 +142,12 @@ namespace LimitsWidget
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 List<ServiceSnapshot> result = null;
-                try { result = collector.Collect(); }
+                // каждый сервис попадает в карточку сразу по готовности; поздний результат старого опроса отбрасывается
+                Action<ServiceSnapshot> early = snap => Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (SnapshotBoard.Merge(snaps, snap, cfg.Order)) Render();
+                }));
+                try { result = collector.Collect(early); }
                 catch (Exception ex) { Log.Write("collect: " + ex); }
                 state.Save();
                 Dispatcher.BeginInvoke(new Action(() =>
@@ -146,7 +155,8 @@ namespace LimitsWidget
                     busy = false;
                     if (result != null)
                     {
-                        snaps = result;
+                        foreach (var r in result) SnapshotBoard.Merge(snaps, r.Clone(), cfg.Order);
+                        SnapshotBoard.Retain(snaps, new HashSet<string>(result.Select(r => r.Id)));
                         updatedAt = DateTime.Now;
                     }
                     Render();
@@ -161,15 +171,23 @@ namespace LimitsWidget
             if (cardDrag.Busy) return;
             theme = Theme.Resolve(opts.Theme ?? state.Theme);
             ApplyLoginOverlay();
+            var shown = CardOrder.Apply(snaps, state.CardOrder);
+            if (tray != null && shown.Count > 0) tray.Update(shown, DateTime.Now);
+            // скрытая карточка: значок в трее, сбор и телеметрия продолжаются, дерево WPF не строится (IsVisibleChanged перерисует)
+            if (!IsVisible) return;
             var actions = new CardActions { Refresh = Refresh, Menu = a => OpenMenu(a, false), OpenUrl = OpenUrl, Run = RunAction, TogglePin = ToggleTopmost, Minimize = HideToTray, Pinned = state.Topmost, CycleTheme = CycleTheme, ThemeMode = state.Theme };
             actions.BeginDrag = (id, card, e) => cardDrag.Attach((StackPanel)card.Parent, card, e);
             actions.MoveCard = MoveCard;
-            var shown = CardOrder.Apply(snaps, state.CardOrder);
+            actions.ActivityExpanded = state.ActivityExpanded;
+            actions.ToggleActivity = () => { state.ActivityExpanded = !state.ActivityExpanded; state.Save(); Render(); };
             var view = CardView.Build(shown, theme, DateTime.Now, updatedAt, busy, actions, state.Compact, state.Opacity);
             if (Math.Abs(state.Scale - 1) > 0.01) view.LayoutTransform = new ScaleTransform(state.Scale, state.Scale);
             Content = view;
-            if (tray != null && shown.Count > 0) tray.Update(shown, DateTime.Now);
+            renders++;
         }
+
+        int renders;
+        internal int RenderCount { get { return renders; } }
 
         // Перетаскивание закончилось: order — новый порядок id, null — без изменений (просто перерисовать).
         void OnCardsReordered(List<string> order)
@@ -213,7 +231,7 @@ namespace LimitsWidget
             public string SavedMessage, SavedActionId, SavedActionLabel;
         }
 
-        static readonly string[] LoginServices = { "claude" };
+        static readonly string[] LoginServices = { "claude", "kimi" };
         const string LoginCancelSuffix = "-login-cancel", LoginWindowSuffix = "-login-window";
         readonly Dictionary<string, LoginSlot> logins = new Dictionary<string, LoginSlot>();
 
@@ -235,7 +253,13 @@ namespace LimitsWidget
 
         static string LoginName(string svc)
         {
-            return "Claude";
+            return svc == "kimi" ? "Kimi Code" : "Claude";
+        }
+
+        // `kimi login` — device-code: CLI печатает адрес и код, браузер открывает виджет. `claude auth login` открывает его сам.
+        static bool OpensBrowserItself(string svc)
+        {
+            return svc == "claude";
         }
 
         string LoginExe(string svc)
@@ -258,6 +282,7 @@ namespace LimitsWidget
         {
             string svc;
             if (id == ClaudeProvider.LoginAction) StartLogin("claude");
+            else if (id == KimiProvider.LoginAction) StartLogin("kimi");
             else if (SplitLoginId(id, LoginCancelSuffix, out svc)) CancelLogin(svc);
             else if (SplitLoginId(id, LoginWindowSuffix, out svc)) LoginInWindow(svc);
         }
@@ -300,8 +325,8 @@ namespace LimitsWidget
             snap.Attention = true;
             if (slot.State == LoginState.Waiting)
             {
-                snap.Message = "Открылся браузер — подтвердите вход в " + LoginName(svc)
-                    + ". Виджет обновится сам.";
+                snap.Message = (slot.Code != null ? "Код подтверждения: " + slot.Code + ". " : "")
+                    + "Открылся браузер — подтвердите вход в " + LoginName(svc) + ". Виджет обновится сам.";
                 snap.ActionId = svc + LoginCancelSuffix;
                 snap.ActionLabel = "Отмена";
             }
@@ -330,6 +355,8 @@ namespace LimitsWidget
                 slot.Code = code;
                 Render();
             }));
+            if (!OpensBrowserItself(svc))
+                login.UrlFound = url => Dispatcher.BeginInvoke(new Action(() => OpenUrl(url)));
             login.Done = ok => Dispatcher.BeginInvoke(new Action(() =>
             {
                 slot.Login = null;
@@ -555,6 +582,7 @@ namespace LimitsWidget
             if (state.CardOrder.Count > 0)
                 Add(m, item, null, "Сбросить порядок карточек", () => { state.CardOrder = new List<string>(); state.Save(); Render(); });
             Add(m, item, null, "Тема: " + ThemeName(state.Theme), CycleTheme);
+            Add(m, item, null, "Подписки…", OpenSubscriptions);
             m.Resources["LW.Hover"] = t.Hover;   // подсветка кнопок − / +
             AddStepper(m, item, t, "Непрозрачность фона", () => Pct(state.Opacity), step =>
             {
@@ -685,6 +713,18 @@ namespace LimitsWidget
                 Log.Write("autostart: " + ex.Message);
                 MessageBox.Show("Не удалось изменить автозапуск: " + ex.Message, "Лимиты нейросетей");
             }
+        }
+
+        // Нативный диалог «Подписки…»: пишет только plan/profileUrl в config.json; карточки сразу показывают новое имя.
+        void OpenSubscriptions()
+        {
+            var t = theme ?? Theme.Resolve(state.Theme);
+            var dlg = new SubscriptionsDialog(Config.Load(cfg.FilePath), snaps, t);
+            if (IsVisible) dlg.Owner = this;
+            if (dlg.ShowDialog() != true) return;
+            var fresh = Config.Load(cfg.FilePath);   // отдельный экземпляр: общий cfg перечитает сборщик при следующем опросе
+            foreach (var s in snaps) PlanResolver.Apply(s, fresh.Svc(s.Id));
+            Render();
         }
 
         void OpenConfig()

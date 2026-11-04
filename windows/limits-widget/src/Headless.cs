@@ -19,7 +19,8 @@ namespace LimitsWidget
             var cfg = Config.Load(o.ConfigPath ?? Path.Combine(Program.BaseDir, "config.json"));
             // история кредитов читается для тестового рендера; режим без окна state.json не сохраняет
             var state = State.Load(o.StatePath);
-            return new Collector(cfg, state, o.FixturesDir).Collect();
+            try { return new Collector(cfg, state, o.FixturesDir).Collect(); }
+            finally { KimiServerManager.Shared.Dispose(); }   // свой скрытый сервер Kimi не переживает режим без окна
         }
 
         public static int Dump(CliOptions o)
@@ -37,7 +38,8 @@ namespace LimitsWidget
             // порядок карточек — ручной, из state.json (как в окне)
             var snaps = CardOrder.Apply(Collect(o), State.Load(o.StatePath).CardOrder);
             var theme = Theme.Resolve(o.Theme ?? "auto");
-            var card = CardView.Build(snaps, theme, DateTime.Now, DateTime.Now, false, new CardActions(), o.Compact, 1.0);
+            var card = CardView.Build(snaps, theme, DateTime.Now, DateTime.Now, false, new CardActions { ActivityExpanded = o.ActivityExpanded }, o.Compact, 1.0);
+            if (Math.Abs(o.UiScale - 1) > 0.01) card.LayoutTransform = new ScaleTransform(o.UiScale, o.UiScale);
 
             // подложка «под обои», чтобы видеть полупрозрачность карточки
             var backdrop = new LinearGradientBrush(

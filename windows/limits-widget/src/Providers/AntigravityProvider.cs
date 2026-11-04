@@ -77,30 +77,68 @@ namespace LimitsWidget
                 return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка",
                     "agy /usage не вернул квот" + (hint != null ? ": " + hint : ""), Placeholders());
             }
-            AddCredits(snap, ctx, fixture);
+            // время квот — завершение запроса квот; кредиты догружаются отдельно и время квот не сдвигают
             ProviderUtil.MarkFresh(snap, ctx, fixture);
+            ctx.PublishCore(snap);
+            AddCredits(snap, ctx, fixture);
             return snap;
         }
+
+        // Кредиты — отдельный кэш на 15 минут (и удача, и сбой) и свой срок 10 секунд: квоты их не ждут.
+        internal sealed class CreditsCache
+        {
+            public static readonly TimeSpan Ttl = TimeSpan.FromMinutes(15);
+            public const int TimeoutMs = 10000;
+            readonly object gate = new object();
+            DateTime at;
+            bool has;
+            double? remaining;
+            int queries;
+
+            public int Queries { get { lock (gate) return queries; } }
+
+            // query: null — запрос не удался.
+            public double? Get(DateTime utcNow, Func<double?> query, out bool fromCache)
+            {
+                lock (gate)
+                {
+                    fromCache = has && utcNow - at < Ttl && utcNow >= at;
+                    if (fromCache) return remaining;
+                    queries++;
+                    remaining = query();
+                    at = utcNow;
+                    has = true;
+                    return remaining;
+                }
+            }
+        }
+
+        internal static readonly CreditsCache Credits = new CreditsCache();
 
         // agy -p "/credits": локальная команда без модели; command.data.remaining_credits — платные кредиты Google One.
         // Ошибка не показывается пользователю: полосы квот важнее, только запись в журнал.
         static void AddCredits(ServiceSnapshot snap, ProviderContext ctx, bool fixture)
         {
+            double? remaining;
             string text = ProviderUtil.Fixture(ctx, "antigravity-credits.json");
-            if (text == null)
+            if (text != null) remaining = ParseCredits(text);
+            else
             {
                 if (fixture) return;
                 string exe = Cli.Resolve(ctx.Svc.Command, "agy");
                 if (exe == null) return;
-                var r = Cli.Run(exe, "-p \"/credits\" --output-format json", ctx.Svc.TimeoutSeconds * 1000, ctx.Svc.MaxProcesses);
-                if (!r.Ok)
+                bool cached;
+                remaining = Credits.Get(ctx.UtcNow(), () =>
                 {
-                    Log.Write("agy /credits: " + r.Describe());
-                    return;
-                }
-                text = r.StdOut;
+                    var r = Cli.Run(exe, "-p \"/credits\" --output-format json", Math.Min(CreditsCache.TimeoutMs, ctx.Svc.TimeoutSeconds * 1000), ctx.Svc.MaxProcesses);
+                    if (!r.Ok)
+                    {
+                        Log.Write("agy /credits: " + r.Describe());
+                        return null;
+                    }
+                    return ParseCredits(r.StdOut);
+                }, out cached);
             }
-            double? remaining = Json.Num(Json.Get(Json.TryParse(text), "command.data.remaining_credits"));
             if (!remaining.HasValue || remaining.Value <= 0) return;
             var e = new ExtraItem();
             e.Icon = "\uE8C7";
@@ -109,6 +147,13 @@ namespace LimitsWidget
             e.Accent = "info";
             e.Tip = "Платные AI-кредиты Google One: расходуются в Antigravity, когда исчерпаны квоты групп моделей.";
             snap.Extras.Add(e);
+        }
+
+        static double? ParseCredits(string text)
+        {
+            double? v = Json.Num(Json.Get(Json.TryParse(text), "command.data.remaining_credits"));
+            if (v.HasValue && (double.IsNaN(v.Value) || double.IsInfinity(v.Value))) return null;
+            return v;
         }
 
         static double? WindowMinutes(string window)
@@ -133,7 +178,7 @@ namespace LimitsWidget
                 default: bar.Chip = window ?? "?"; bar.Label = g; break;
             }
             bar.Quota = QuotaObservation.Create("antigravity", group.Equals("Gemini Models", StringComparison.OrdinalIgnoreCase) ? "subscription.gemini" : group.Equals("Claude and GPT models", StringComparison.OrdinalIgnoreCase) ? "subscription.claude_gpt" : null, window == "5h" ? "five_hour" : window == "weekly" ? "seven_day" : window == "daily" ? "daily" : null, WindowMinutes(window).HasValue ? (long?)(WindowMinutes(window).Value * 60) : null, (1 - remaining) * 100, reset);
-            bar.Used = Math.Max(0, Math.Min(1, 1 - remaining)) * 100;
+            bar.Used = double.IsNaN(remaining) || double.IsInfinity(remaining) ? (double?)null : Math.Max(0, Math.Min(1, 1 - remaining)) * 100;
             bar.ResetsAt = reset;
             bar.Tip = tip;
             return bar;

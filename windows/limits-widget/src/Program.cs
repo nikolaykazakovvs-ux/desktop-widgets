@@ -10,8 +10,9 @@ using System.Windows;
 [assembly: AssemblyTitle("Лимиты нейросетей")]
 [assembly: AssemblyProduct("LimitsWidget")]
 [assembly: AssemblyDescription("Десктоп-виджет лимитов Claude Code, Kimi Code, Antigravity и GPT/Codex")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyInformationalVersion("1.1.0")]
 
 namespace LimitsWidget
 {
@@ -27,6 +28,8 @@ namespace LimitsWidget
         public string StatePath;
         public bool Compact;        // --compact : для --render
         public double RenderScale = 2;  // --render-scale 6 : крупнее, для проверки мелких деталей
+        public double UiScale = 1;  // --ui-scale 1.5 : масштаб карточки (как «Размер» в меню), для --render
+        public bool ActivityExpanded;   // --activity-expanded : развёрнутая статистика Codex, для --render
         public bool Show;           // --show : сразу поднять карточку поверх окон
         public bool Exit;           // --exit : попросить работающую копию завершиться (так делает build.ps1)
 
@@ -48,6 +51,12 @@ namespace LimitsWidget
                     case "--state": o.StatePath = next; i++; break;
                     case "--compact": o.Compact = true; break;
                     case "--show": o.Show = true; break;
+                    case "--activity-expanded": o.ActivityExpanded = true; break;
+                    case "--ui-scale":
+                        double us;
+                        if (double.TryParse(next, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out us) && us >= State.ScaleMin && us <= State.ScaleMax) o.UiScale = us;
+                        i++;
+                        break;
                     case "--exit": o.Exit = true; break;
                     case "--render-scale":
                         double sc;
@@ -62,6 +71,7 @@ namespace LimitsWidget
 
     static class Program
     {
+        public const string Version = "1.1.0";   // согласовано с AssemblyVersion/FileVersion/InformationalVersion
         public const string ShowEventName = "Local\\LimitsWidget.Show";
         public const string ExitEventName = "Local\\LimitsWidget.Exit";
         public static string BaseDir;
@@ -121,6 +131,8 @@ namespace LimitsWidget
                     }
                     return 0;
                 }
+                // свой скрытый сервер Kimi завершается вместе с виджетом (при падении его дерево закрывает Job)
+                AppDomain.CurrentDomain.ProcessExit += (s, e) => KimiServerManager.Shared.Dispose();
                 var app = new Application();
                 app.ShutdownMode = ShutdownMode.OnMainWindowClose;
                 app.DispatcherUnhandledException += (s, e) =>

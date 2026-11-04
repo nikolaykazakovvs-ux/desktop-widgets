@@ -6,21 +6,24 @@ using System.Threading;
 
 namespace LimitsWidget
 {
-    // Вход через CLI без окна (`claude auth login`): Kimi вход не нужен — виджет подхватывает сессию приложения Kimi Code; CLI сам открывает браузер и ждёт подтверждения.
-    // Вывод читается построчно: если CLI печатает код подтверждения («...enter code: ABCD-1234»), он передаётся наружу.
+    // Вход через CLI без окна: `claude auth login` (CLI сам открывает браузер) и `kimi login` (device-code: CLI печатает
+    // адрес подтверждения и код, браузер открывает виджет). Вход и хранение ключей — дело самого CLI.
+    // Вывод читается построчно и никуда не пишется: наружу передаются только код подтверждения и https-адрес.
     // Колбэки приходят из фоновых потоков — в UI их переносит вызывающий (WidgetWindow).
     sealed class CliLogin
     {
-        static readonly Regex CodeLine = new Regex(@"enter code:\s*(\S+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        static readonly Regex CodeLine = new Regex(@"(?:enter(?:\s+the)?|user|verification|device)\s+code\s*[:：]?\s*([A-Z0-9]{4,}(?:-[A-Z0-9]{3,})*)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        static readonly Regex UrlLine = new Regex(@"https://[^\s""'<>]+", RegexOptions.Compiled);
         const int WaitMs = 5 * 60 * 1000;
 
         readonly string exe, args;
         readonly object gate = new object();
         Process proc;
         bool cancelRequested;
-        int codeSent, doneSent;
+        int codeSent, doneSent, urlSent;
 
         public Action<string> CodeFound;   // код подтверждения найден в выводе (один раз за вход)
+        public Action<string> UrlFound;    // https-адрес подтверждения (один раз за вход); null — не нужен
         public Action<bool> Done;          // вход завершён: true — CLI вышел с кодом 0; вызывается ровно один раз
 
         public CliLogin(string exe, string args)
@@ -114,6 +117,12 @@ namespace LimitsWidget
 
         void Scan(string line)
         {
+            var u = UrlLine.Match(line);
+            if (u.Success && UrlFound != null && Interlocked.Exchange(ref urlSent, 1) == 0)
+            {
+                try { UrlFound(u.Value.TrimEnd('.', ',', ')')); }
+                catch (Exception ex) { Log.Write("cli login url: " + ex.GetType().Name); }
+            }
             var m = CodeLine.Match(line);
             if (!m.Success || Interlocked.Exchange(ref codeSent, 1) != 0) return;
             var cb = CodeFound;

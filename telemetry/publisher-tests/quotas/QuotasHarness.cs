@@ -88,6 +88,28 @@ namespace LimitsWidget
             noProvenance.LastAttemptAt=DateTime.UtcNow;
             Check(noProvenance.Bars.All(b=>b.Quota==null || b.Quota.MeasuredAt==null),"Claude without cache_status still has unknown source age");
             Emit("claude-no-provenance",noProvenance);
+            // 1.1: unknown Claude model-scoped label and missing utilization stay unknown/partial, never a guessed pool or zero.
+            File.WriteAllText(Path.Combine(fixtures,"claude-get-usage.json"), "{\"rate_limits\":{\"five_hour\":{\"utilization\":10},\"model_scoped\":[{\"display_name\":\"Fable\"},{\"display_name\":\"Opus X\",\"key\":\"seven_day_opus\",\"utilization\":20}]}}");
+            var scoped = new ClaudeProvider().Collect(new ProviderContext { Config=cfg, Svc=cfg.Svc("claude"), Now=DateTime.Now, FixturesDir=fixtures, FixtureOnly=true });
+            scoped.LastAttemptAt=DateTime.UtcNow;
+            Check(scoped.Bars.Any(b=>b.Label.Contains("Fable") && b.Quota==null && !b.Used.HasValue),"unknown scoped label: no typed pool, no zero");
+            Check(scoped.Bars.Any(b=>b.Quota!=null && b.Quota.PoolId=="subscription.opus"),"confirmed scoped key keeps pool");
+            var scopedJson = Emit("claude-scoped-unknown",scoped);
+            Check(!scopedJson.Contains("Fable") && !scopedJson.Contains("\"ok\",\"reason\":\"none\",\"pools\""),"scoped label not exported; provider not ok");
+            // 1.1: Codex activity/plan stay out of public telemetry.
+            File.WriteAllText(Path.Combine(fixtures,"codex-ratelimits.json"), "{\"result\":{\"rateLimits\":{\"planType\":\"pro\",\"primary\":{\"windowDurationMins\":300,\"usedPercent\":25,\"resetsAt\":1893456000}}}}");
+            File.WriteAllText(Path.Combine(fixtures,"codex-account-usage.json"), "{\"result\":{\"summary\":{\"lifetimeTokens\":987654321},\"dailyUsageBuckets\":[{\"startDate\":\"2026-11-01\",\"tokens\":5}]}}");
+            var codexActivity = new CodexProvider().Collect(new ProviderContext { Config=cfg, Svc=cfg.Svc("codex"), Now=DateTime.Now, FixturesDir=fixtures, FixtureOnly=true });
+            codexActivity.LastAttemptAt=DateTime.UtcNow;
+            Check(codexActivity.Activity!=null && codexActivity.Activity.LifetimeTokens==987654321 && codexActivity.AutoPlan=="Pro","codex fixture activity and plan parsed");
+            var activityJson = Emit("codex-activity-private",codexActivity);
+            Check(!activityJson.Contains("987654321") && !activityJson.ToLowerInvariant().Contains("pro\""),"activity/plan never exported");
+            // 1.1: invalid Kimi ratio never reaches UI or telemetry as a number.
+            File.WriteAllText(Path.Combine(fixtures,"kimi-server-usage.json"), "{\"data\":{\"kind\":\"ok\",\"quota\":{\"usages\":{\"limit5h\":{\"usedRatio\":1.7}}}}}");
+            var badKimi = new KimiProvider().Collect(new ProviderContext { Config=cfg, Svc=cfg.Svc("kimi"), Now=DateTime.Now, FixturesDir=fixtures, FixtureOnly=true });
+            badKimi.LastAttemptAt=DateTime.UtcNow;
+            Check(badKimi.Status==SvcStatus.Error && badKimi.Bars.All(b=>b.Placeholder),"invalid Kimi ratio rejected");
+            Emit("kimi-invalid-ratio",badKimi);
             var missing=Path.Combine(output,"missing-fixtures"); Directory.CreateDirectory(missing);
             foreach(var provider in new IProvider[]{new CodexProvider(),new ClaudeProvider(),new KimiProvider(),new AntigravityProvider()})
             {
