@@ -84,6 +84,8 @@ namespace LimitsWidget
             Closing += (s, e) => SavePosition();
             // скрытая карточка не перестраивается; при показе — сразу свежая отрисовка
             IsVisibleChanged += (s, e) => { if (IsVisible) Render(); };
+            // перенесли окно (в том числе на другой монитор) — пересчитать допустимую высоту
+            LocationChanged += (s, e) => { if (viewport != null) viewport.MaxHeight = Viewport.MaxHeight(Viewport.WorkArea(this), Top); };
             Closed += (s, e) =>
             {
                 timer.Stop();
@@ -182,11 +184,33 @@ namespace LimitsWidget
             actions.ToggleActivity = () => { state.ActivityExpanded = !state.ActivityExpanded; state.Save(); Render(); };
             var view = CardView.Build(shown, theme, DateTime.Now, updatedAt, busy, actions, state.Compact, state.Opacity);
             if (Math.Abs(state.Scale - 1) > 0.01) view.LayoutTransform = new ScaleTransform(state.Scale, state.Scale);
-            Content = view;
+            // карточка в постоянном ScrollViewer: позиция прокрутки переживает перерисовку каждые 30 с
+            if (viewport == null) viewport = Viewport.Create();
+            double offset = viewport.VerticalOffset;
+            viewport.Content = view;
+            if (!ReferenceEquals(Content, viewport)) Content = viewport;
+            FitViewport();
+            if (offset > 0) viewport.ScrollToVerticalOffset(offset);
             renders++;
         }
 
         int renders;
+        ScrollViewer viewport;
+
+        // Не выше рабочей области своего монитора: лишнее — в прокрутку. Окно, вылезшее за низ, сдвигается вверх.
+        void FitViewport()
+        {
+            if (viewport == null) return;
+            var work = Viewport.WorkArea(this);
+            viewport.MaxHeight = Viewport.MaxHeight(work, Top);
+            if (!IsVisible) return;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!IsVisible || ActualHeight <= 0) return;
+                double top = Viewport.Fit(work, Top, ActualHeight);
+                if (Math.Abs(top - Top) > 0.5) Top = top;
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
         internal int RenderCount { get { return renders; } }
 
         // Перетаскивание закончилось: order — новый порядок id, null — без изменений (просто перерисовать).
