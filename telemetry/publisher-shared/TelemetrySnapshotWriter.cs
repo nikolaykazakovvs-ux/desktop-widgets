@@ -26,7 +26,7 @@ namespace DesktopWidgets.Telemetry
     {
         public const int MaxBytes = 1024 * 1024;
         // Temp handle: write, attest and carry the replaced DACL by handle; DELETE renames or discards this exact object.
-        const uint TempAccess = 0x40000000 | 0x00010000 | 0x00020000 | 0x00040000, CreateNew = 1, TempFlags = 0x80 | 0x00200000;
+        const uint TempAccess = 0x40000000 | 0x00010000 | 0x00020000 | 0x00040000, CreateNew = 1, OpenAlways = 4, TempFlags = 0x80 | 0x00200000;
         const int FileRenameInfo = 3, FileDispositionInfo = 4, FileRenameInfoEx = 22;
         const int RenameReplaceIfExists = 0x1, RenamePosixSemantics = 0x2;
         readonly object gate = new object();
@@ -110,8 +110,16 @@ namespace DesktopWidgets.Telemetry
                 {
                     if ((File.GetAttributes(lockPath) & FileAttributes.ReparsePoint) != 0) throw new UnauthorizedAccessException("lock_reparse");
                 }
-                try { pathLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-                catch (IOException ex) { if ((ex.HResult & 65535) == 32 || (ex.HResult & 65535) == 33) { lastError = "writer_already_running"; return; } throw; }
+                // Created with this user as explicit owner (see CreateOwned); an already existing lock keeps its own
+                // owner and is attested below, so a foreign-owned lock still fails closed.
+                SafeFileHandle lockHandle = CreateOwned(lockPath, 0x80000000 | 0x40000000, OpenAlways, 0x80, sid);
+                if (lockHandle.IsInvalid)
+                {
+                    int error = Marshal.GetLastWin32Error(); lockHandle.Dispose();
+                    if (error == 32 || error == 33) { lastError = "writer_already_running"; return; }
+                    throw Win32Failure(error);
+                }
+                pathLock = new FileStream(lockHandle, FileAccess.ReadWrite);
                 AssertPrivate(pathLock.GetAccessControl(), sid);
                 var clock = Stopwatch.StartNew();
                 long next = 0;
@@ -169,7 +177,7 @@ namespace DesktopWidgets.Telemetry
             {
                 // CREATE_NEW never opens an existing name or link. The temp stays exclusively open until it is renamed
                 // or discarded through this handle, so no path is re-resolved for it after a failed check.
-                handle = CreateFileW(temp, TempAccess, 0, IntPtr.Zero, CreateNew, TempFlags, IntPtr.Zero);
+                handle = CreateOwned(temp, TempAccess, CreateNew, TempFlags, sid);
                 if (handle.IsInvalid) { int error = Marshal.GetLastWin32Error(); handle.Dispose(); handle = null; throw Win32Failure(error); }
                 file = new FileStream(handle, FileAccess.Write);
                 file.Write(bytes, 0, bytes.Length); file.Flush();
@@ -364,6 +372,31 @@ namespace DesktopWidgets.Telemetry
         }
 
         static IOException CanonicalPathError() { return new IOException("canonical_path_resolution_failed"); }
+
+        // Without a security descriptor a new file is owned by the token's default owner. For an elevated member of
+        // Administrators (UAC off, e.g. hosted CI runners) that is BUILTIN\Administrators, which AssertPrivate rightly
+        // rejects as foreign_owner. The descriptor sets only the owner to this user's SID (always a permitted owner);
+        // no DACL is present, so the file inherits exactly the verified private directory ACEs. Existing files
+        // (OPEN_ALWAYS on a present lock) ignore it and keep being attested by owner/DACL.
+        static SafeFileHandle CreateOwned(string path, uint access, uint disposition, uint flags, SecurityIdentifier owner)
+        {
+            var descriptor = new RawSecurityDescriptor(ControlFlags.SelfRelative, owner, null, null, null);
+            byte[] binary = new byte[descriptor.BinaryLength];
+            descriptor.GetBinaryForm(binary, 0);
+            var pin = GCHandle.Alloc(binary, GCHandleType.Pinned);
+            try
+            {
+                var attributes = new SecurityAttributes { Length = Marshal.SizeOf(typeof(SecurityAttributes)), Descriptor = pin.AddrOfPinnedObject(), InheritHandle = 0 };
+                return CreateFileW(path, access, 0, ref attributes, disposition, flags, IntPtr.Zero);
+            }
+            finally { pin.Free(); }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct SecurityAttributes { public int Length; public IntPtr Descriptor; public int InheritHandle; }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        static extern SafeFileHandle CreateFileW(string path, uint desiredAccess, uint shareMode, ref SecurityAttributes securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
         static extern SafeFileHandle CreateFileW(string path, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
