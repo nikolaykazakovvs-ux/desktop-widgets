@@ -414,7 +414,7 @@ namespace LimitsWidget
                 if (!st.HasValue)
                 {
                     string managed = ManagedStatus(inst, token, Math.Min(AuthCheckMs, timeoutMs));
-                    if (managed == "unauthenticated" || managed == "revoked" || managed == "expired") { probe.Login = true; return false; }
+                    if (managed == "none" || managed == "unauthenticated" || managed == "revoked" || managed == "expired") { probe.Login = true; return false; }
                     Log.Write("kimi: локальный сервер Kimi Code :" + inst.Port + ": квоты не получены (kind=error), вход: " + (managed ?? "неизвестно"));
                     return false;
                 }
@@ -439,13 +439,26 @@ namespace LimitsWidget
 
         const int AuthCheckMs = 3000;
 
-        // managed_provider.status из GET /api/v1/auth: authenticated | expired | revoked | unauthenticated; иное/сбой — null.
+        // GET /api/v1/auth → managed_provider: { status: authenticated | expired | revoked | unauthenticated } или явный null.
+        // Явный null в отвеченном (HTTP 200) снимке — провайдер managed:kimi-code не настроен: Kimi Code 2.4.1 удаляет его при
+        // выходе, а до первого входа его нет — это «нужен вход» ("none"). Нет поля, не объект, не JSON, сбой или недоступность
+        // /auth — неизвестно (null): требованием входа не считается.
         internal static string ManagedStatus(Instance inst, string token, int timeoutMs)
         {
             int status;
             string body = Get(inst.BaseUrl + "/api/v1/auth", token, Math.Max(500, timeoutMs), false, out status);
             if (body == null || status != 200) return null;
-            string v = Json.Str(Json.Get(Json.TryParse(body), "data.managed_provider.status"));
+            return ManagedStatusOf(Json.TryParse(body));
+        }
+
+        internal static string ManagedStatusOf(object env)
+        {
+            var data = Json.Obj(Json.Get(env, "data"));
+            if (data == null || !data.ContainsKey("managed_provider")) return null;
+            var mp = data["managed_provider"];
+            if (mp == null) return "none";
+            if (Json.Obj(mp) == null) return null;
+            string v = Json.Str(Json.Get(mp, "status"));
             switch (v)
             {
                 case "authenticated": case "expired": case "revoked": case "unauthenticated": return v;

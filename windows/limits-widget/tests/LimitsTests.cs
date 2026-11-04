@@ -621,7 +621,13 @@ namespace LimitsWidget
                 new { Name = "refresh-failed", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"refresh rejected MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"name\":\"managed:kimi-code\",\"status\":\"expired\"}}}", Login = true },
                 new { Name = "network-authenticated", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"fetch failed MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"name\":\"managed:kimi-code\",\"status\":\"authenticated\"}}}", Login = false },
                 new { Name = "network-auth-unavailable", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"timeout MSG-CANARY\"}}", AuthStatus = 500, Auth = "{}", Login = false },
-                new { Name = "no-managed-provider", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":null}}", Login = false },
+                // Kimi 2.4.1: выход удаляет managed:kimi-code, до первого входа его нет — отвеченный /auth с явным null = нужен вход
+                new { Name = "logged-out-managed-null", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"No token MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"models_ready\":false,\"providers_count\":0,\"managed_provider\":null}}", Login = true },
+                new { Name = "malformed-no-managed-field", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"models_ready\":true}}", Login = false },
+                new { Name = "malformed-no-data", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":40001,\"msg\":\"bad\"}", Login = false },
+                new { Name = "malformed-not-json", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 200, Auth = "<html>", Login = false },
+                new { Name = "malformed-provider-string", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":\"none\"}}", Login = false },
+                new { Name = "auth-401-bearer-mismatch", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"x MSG-CANARY\"}}", AuthStatus = 401, Auth = "{\"code\":40101,\"data\":{\"managed_provider\":null}}", Login = false },
                 new { Name = "upstream-503", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"status\":503,\"message\":\"MSG-CANARY\"}}", AuthStatus = 200, Auth = "{\"code\":0,\"data\":{\"managed_provider\":{\"status\":\"unauthenticated\"}}}", Login = false },
                 new { Name = "control-status401", Usage = "{\"code\":0,\"data\":{\"kind\":\"error\",\"status\":401,\"message\":\"MSG-CANARY\"}}", AuthStatus = 500, Auth = "{}", Login = true }
             };
@@ -651,6 +657,19 @@ namespace LimitsWidget
             Log.Write("probe line");
             string log = File.ReadAllText(Path.Combine(Program.BaseDir, "widget.log"));
             Check(!log.Contains("MSG-CANARY") && !log.Contains("synthetic-auth-token"), "error message and token never logged");
+
+            // разбор /auth: явный null — «нет провайдера»; отсутствие поля/не объект/неизвестный статус — неизвестно
+            Check(KimiProvider.ManagedStatusOf(Json.Parse("{\"data\":{\"managed_provider\":null}}")) == "none", "explicit null -> none");
+            Check(KimiProvider.ManagedStatusOf(Json.Parse("{\"data\":{}}")) == null, "missing field -> unknown");
+            Check(KimiProvider.ManagedStatusOf(Json.Parse("{\"data\":null}")) == null, "null data -> unknown");
+            Check(KimiProvider.ManagedStatusOf(Json.Parse("{\"data\":{\"managed_provider\":{\"status\":\"weird\"}}}")) == null, "unknown status -> unknown");
+            Check(KimiProvider.ManagedStatusOf(Json.Parse("{\"data\":{\"managed_provider\":{\"status\":\"authenticated\"}}}")) == "authenticated", "authenticated");
+            // /auth недоступен (порт закрыт): неизвестно, а не «нужен вход»
+            var probeListener = new TcpListener(IPAddress.Loopback, 0);
+            probeListener.Start();
+            int closedPort = ((IPEndPoint)probeListener.LocalEndpoint).Port;
+            probeListener.Stop();
+            Check(KimiProvider.ManagedStatus(new KimiProvider.Instance { Host = "127.0.0.1", Port = closedPort }, "t", 1000) == null, "unreachable /auth -> unknown");
             Program.BaseDir = output;
         }
 

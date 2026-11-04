@@ -38,7 +38,10 @@ namespace LimitsWidget
             // порядок карточек — ручной, из state.json (как в окне)
             var snaps = CardOrder.Apply(Collect(o), State.Load(o.StatePath).CardOrder);
             var theme = Theme.Resolve(o.Theme ?? "auto");
-            var card = CardView.Build(snaps, theme, DateTime.Now, DateTime.Now, false, new CardActions { ActivityExpanded = o.ActivityExpanded }, o.Compact, 1.0);
+            // действия-заглушки: картинка показывает те же кнопки, что и окно (↗ профиля, тема, скрепка, свернуть, «Подробнее»)
+            var act = new CardActions { OpenUrl = u => { }, Run = id => { }, TogglePin = () => { }, Minimize = () => { }, CycleTheme = () => { },
+                ThemeMode = "auto", ToggleActivity = () => { }, ActivityExpanded = o.ActivityExpanded };
+            var card = CardView.Build(snaps, theme, DateTime.Now, DateTime.Now, false, act, o.Compact, 1.0);
             if (Math.Abs(o.UiScale - 1) > 0.01) card.LayoutTransform = new ScaleTransform(o.UiScale, o.UiScale);
 
             // подложка «под обои», чтобы видеть полупрозрачность карточки
