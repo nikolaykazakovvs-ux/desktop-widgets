@@ -18,7 +18,7 @@ namespace LimitsWidget
     // kimi/codex и loopback-серверы. Сеть провайдеров, аккаунты, credentials и установленная копия не используются.
     static class LimitsTests
     {
-        static string output, fakeKimi, fakeCodex;
+        static string output, fakeKimi, fakeCodex, fakeClaude;
         static int assertions, sections;
         static readonly List<string> report = new List<string>();
 
@@ -461,6 +461,100 @@ namespace LimitsWidget
             Program.BaseDir = output;
         }
 
+        static void ClaudeSubscription()
+        {
+            // разбор: только subscriptionType; logged-out/нет поля — ответ без тарифа; не JSON — ответа нет
+            var max = ClaudeAuth.Parse("{\"loggedIn\":true,\"subscriptionType\":\"max\",\"email\":\"x@y.z\"}");
+            Check(max.Answered && max.Plan == "Max", "max -> Max (no multiplier)");
+            Check(ClaudeAuth.Parse("{\"loggedIn\":false,\"subscriptionType\":\"max\"}").Plan == null, "logged out -> no plan");
+            Check(ClaudeAuth.Parse("{\"loggedIn\":true}").Answered && ClaudeAuth.Parse("{\"loggedIn\":true}").Plan == null, "missing field -> answered, no plan");
+            Check(!ClaudeAuth.Parse("Logged in (Max)").Answered, "text output -> unsupported");
+            Check(ClaudeAuth.Parse("{\"subscriptionType\":\"team_premium\"}").Plan == "Team Premium", "new schema value readable");
+            Check(ClaudeAuth.Parse("{\"subscriptionType\":\"me@example.test\"}").Plan == null, "non-identifier value rejected");
+            Check(ClaudeAuth.Parse("{\"subscriptionType\":5}").Plan == null, "non-string rejected");
+
+            // настоящий подпроцесс (поддельный claude): поддержка, выход, нет поля, старый CLI, текст, зависание
+            Program.BaseDir = NewDir("claude-auth-log");
+            string calls = Path.Combine(Program.BaseDir, "calls.txt");
+            Environment.SetEnvironmentVariable("FAKE_CLAUDE_LOG", calls);
+            Environment.SetEnvironmentVariable("CLAUDE_FAKE_PARENT", "1");
+            Environment.SetEnvironmentVariable("ANTHROPIC_FAKE_PARENT", "1");
+            var expect = new Dictionary<string, KeyValuePair<bool, string>>
+            {
+                { "max", new KeyValuePair<bool, string>(true, "Max") }, { "loggedout", new KeyValuePair<bool, string>(true, null) },
+                { "missing", new KeyValuePair<bool, string>(true, null) }, { "unsupported", new KeyValuePair<bool, string>(false, null) },
+                { "text", new KeyValuePair<bool, string>(false, null) }, { "hang", new KeyValuePair<bool, string>(false, null) }
+            };
+            foreach (var kv in expect)
+            {
+                Environment.SetEnvironmentVariable("FAKE_CLAUDE_AUTH", kv.Key);
+                var sw = Stopwatch.StartNew();
+                var r = ClaudeAuth.Query(fakeClaude, 2000);
+                Check(r.Answered == kv.Value.Key && r.Plan == kv.Value.Value, "auth status " + kv.Key);
+                Check(sw.ElapsedMilliseconds < 9000, "auth status bounded: " + kv.Key);
+            }
+            Check(File.ReadAllLines(calls).All(l => l.StartsWith("auth status --json") && !l.Contains("ENV-LEAKED")), "only `auth status --json`, parent CLAUDE*/ANTHROPIC* env not passed");
+            Environment.SetEnvironmentVariable("CLAUDE_FAKE_PARENT", null);
+            Environment.SetEnvironmentVariable("ANTHROPIC_FAKE_PARENT", null);
+            Log.Write("probe line");
+            string log = File.ReadAllText(Path.Combine(Program.BaseDir, "widget.log"));
+            foreach (var canary in new[] { "canary.claude", "ORG-CANARY", "ACC-CANARY", "Canary Org", "unknown option" })
+                Check(!log.Contains(canary), "raw auth output never logged: " + canary);
+            Check(log.Contains("claude auth status: код 1") && log.Contains("не ответил вовремя"), "failures logged by code/timeout only");
+
+            // кэш: ответ — 30 мин, сбой — 10 мин, другой exe — новый запрос
+            var cache = new ClaudeAuth.Cache();
+            var t0 = DateTime.UtcNow;
+            int n = 0;
+            Func<ClaudeAuth.Result> ok = () => { n++; return new ClaudeAuth.Result { Answered = true, Plan = "Max" }; };
+            Func<ClaudeAuth.Result> fail = () => { n++; return new ClaudeAuth.Result(); };
+            cache.Get("a", t0, ok); cache.Get("a", t0.AddMinutes(29), ok);
+            Check(n == 1, "answer cached 30 min");
+            cache.Get("a", t0.AddMinutes(31), fail); cache.Get("a", t0.AddMinutes(40), fail);
+            Check(n == 2, "failure cached 10 min");
+            cache.Get("a", t0.AddMinutes(42), ok); cache.Get("b", t0.AddMinutes(42), ok);
+            Check(n == 4, "refresh after failure ttl; exe change re-queries");
+
+            // провайдер (фикстуры): квоты публикуются раньше, их время/статус не меняются; PII нигде; ручной главнее
+            string fx = NewDir("claude-auth-fx");
+            File.WriteAllText(Path.Combine(fx, "claude-get-usage.json"), "{\"rate_limits\":{\"five_hour\":{\"utilization\":10},\"seven_day\":{\"utilization\":20}}}");
+            File.WriteAllText(Path.Combine(fx, "claude-auth-status.json"), "{\"loggedIn\":true,\"subscriptionType\":\"max\",\"email\":\"canary.claude@example.test\",\"orgId\":\"ORG-CANARY-42\",\"accountUuid\":\"ACC-CANARY-UUID\"}");
+            var cfg = new Config();
+            var cores = new List<ServiceSnapshot>();
+            var ctx = Ctx(cfg, "claude", fx);
+            ctx.Core = c => { var k = c.Clone(); k.DataTime = c.DataTime; cores.Add(k); };
+            var s = new ClaudeProvider().Collect(ctx);
+            Check(s.Status == SvcStatus.Fixture && s.AutoPlan == "Max" && s.Plan == "Max" && s.PlanSource == "provider" && s.AutoPlanSource == ClaudeAuth.Source, "automatic Claude plan from subscriptionType");
+            Check(cores.Count == 1 && cores[0].AutoPlan == null && cores[0].Status == s.Status && cores[0].StatusText == s.StatusText, "quotas published before auth status");
+            Check(s.Bars.All(b => b.Quota == null || !b.Quota.MeasuredAt.HasValue) && !s.DataTime.HasValue, "Claude observation time stays unknown");
+            Check(PlanResolver.Describe(s).Contains("subscriptionType"), "source in tooltip");
+            s.LastAttemptAt = DateTime.UtcNow;
+            var texts = new[] { Json.Serialize(s.ToDict(), false), Json.Serialize(TelemetryPublisher.ProjectProvider(s), false) };
+            foreach (var text in texts)
+                foreach (var canary in new[] { "canary.claude", "ORG-CANARY", "ACC-CANARY", "email", "orgId", "accountUuid" })
+                    Check(!text.Contains(canary), "auth metadata never persisted/exported: " + canary);
+            Check(!texts[1].Contains("Max"), "plan not in public telemetry");
+
+            cfg.Svc("claude").Plan = "Max 20×";
+            var manual = new ClaudeProvider().Collect(Ctx(cfg, "claude", fx));
+            Check(manual.Plan == "Max 20×" && manual.PlanSource == "manual", "manual plan wins (and no auth query needed)");
+            cfg.Svc("claude").Plan = null;
+
+            File.Delete(Path.Combine(fx, "claude-auth-status.json"));
+            var none = new ClaudeProvider().Collect(Ctx(cfg, "claude", fx));
+            Check(none.Status == SvcStatus.Fixture && none.Plan == null && none.PlanSource == null, "no auth answer -> unknown plan, quotas intact");
+            var st = new State();
+            st.PutCache(s);
+            var kept = new ClaudeProvider().Collect(Ctx(cfg, "claude", fx).Also(c => c.State = st));
+            Check(kept.AutoPlan == "Max" && kept.PlanSource == "provider", "previous automatic plan kept when no new answer");
+            File.WriteAllText(Path.Combine(fx, "claude-auth-status.json"), "{\"loggedIn\":false}");
+            var outSnap = new ClaudeProvider().Collect(Ctx(cfg, "claude", fx).Also(c => c.State = st));
+            Check(outSnap.AutoPlan == null && outSnap.Plan == null, "logged-out answer clears automatic plan");
+            Environment.SetEnvironmentVariable("FAKE_CLAUDE_AUTH", null);
+            Environment.SetEnvironmentVariable("FAKE_CLAUDE_LOG", null);
+            Program.BaseDir = output;
+        }
+
         static bool Alive(int pid)
         {
             try { using (var p = Process.GetProcessById(pid)) return !p.HasExited; }
@@ -718,7 +812,7 @@ namespace LimitsWidget
             var now = DateTime.Now;
             var list = new List<ServiceSnapshot>();
             var claude = new ServiceSnapshot { Id = "claude", Title = "Claude Code — очень длинное имя сервиса для проверки многоточия", Status = SvcStatus.Ok, StatusText = Fmt.Clock(now),
-                Url = "https://claude.ai/settings/usage", ProfileUrl = "https://claude.ai/settings/billing", Plan = "Max 20× (вручную, длинное имя)", PlanSource = "manual" };
+                Url = "https://claude.ai/settings/usage", ProfileUrl = "https://claude.ai/settings/billing", Plan = "Max", PlanSource = "provider", AutoPlan = "Max", AutoPlanSource = ClaudeAuth.Source };
             claude.Bars.Add(new LimitBar { Chip = "5 ч", Label = "Сессия · окно 5 часов", Used = 35, ResetsAt = now.AddHours(2) });
             claude.Bars.Add(new LimitBar { Chip = "7 д", Label = "Неделя · Fable", Used = null, Note = "нет данных о расходе" });
             list.Add(claude);
@@ -794,11 +888,23 @@ namespace LimitsWidget
                                         Check(b.Focusable && b.IsTabStop, "button keyboard-focusable");
                                         Check(!string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetName(b)) || b.Content is TextBlock, "button has accessible name");
                                     }
-                                    Check(buttons.Any(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "").StartsWith("Профиль и подписка")), "profile link button");
-                                    Check(buttons.Any(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "").StartsWith("Страница лимитов")), "quota link button");
+                                    // шапка по образцу: одна стрелка (профиль/подписка) на карточку, отдельной кнопки лимитов нет
+                                    foreach (var card in Logical(view).OfType<Border>().Where(b => b.Tag is string))
+                                    {
+                                        var head = Logical(card).OfType<ShrinkFirstPanel>().First();
+                                        var links = Logical(head).OfType<Button>().ToList();
+                                        Check(links.Count == 1 && (System.Windows.Automation.AutomationProperties.GetName(links[0]) ?? "").StartsWith("Профиль и подписка"), "exactly one profile/subscription arrow in header of " + card.Tag);
+                                        Check(((TextBlock)links[0].Content).Text == "", "external-arrow glyph");
+                                    }
+                                    Check(!buttons.Any(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "").StartsWith("Страница лимитов")), "no separate quota arrow in header");
+                                    var pages = CardView.QuotaPages(UiSnaps());
+                                    Check(pages.Count == 2 && pages.All(pg => pg.Key.StartsWith("Страница лимитов · ") && pg.Value.StartsWith("https://")), "quota pages kept as menu actions");
                                     Check(compact || buttons.Any(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "").Contains("статистику Codex")), "activity toggle");
                                     var chips = Logical(view).OfType<Border>().Where(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "").StartsWith("Тариф")).ToList();
                                     Check(chips.Count == 4, "subscription badge on all four headers");
+                                    var chipTexts = chips.Select(c => ((TextBlock)c.Child).Text).ToList();
+                                    Check(chipTexts.SequenceEqual(new[] { "Max", "Allegretto", "тариф?", "Pro" }), "badge shows plan name only: " + string.Join("|", chipTexts));
+                                    Check(chips.All(c => c.ToolTip is string && ((string)c.ToolTip).Length > 0 && !string.IsNullOrEmpty(System.Windows.Automation.AutomationProperties.GetHelpText(c))), "source in tooltip/help text");
 
                                     var rtb = new RenderTargetBitmap((int)Math.Ceiling(host.ActualWidth), (int)Math.Ceiling(host.ActualHeight), 96, 96, PixelFormats.Pbgra32);
                                     rtb.Render(host);
@@ -832,6 +938,7 @@ namespace LimitsWidget
             output = Path.GetFullPath(args[0]);
             fakeKimi = Path.GetFullPath(args[1]);
             fakeCodex = Path.GetFullPath(args[2]);
+            fakeClaude = Path.GetFullPath(args[3]);
             Program.BaseDir = output;
             try
             {
@@ -846,6 +953,7 @@ namespace LimitsWidget
                 Section("Kimi account level (userinfo) and subscription link", KimiLevel);
                 Section("Kimi owned hidden server lifecycle", KimiManagedServer);
                 Section("Codex activity in same app-server", CodexActivity);
+                Section("Claude subscriptionType from auth status", ClaudeSubscription);
                 Section("Antigravity credits cache", AgyCreditsCache);
                 Section("config writer and plan priority", ConfigWriterAndPlans);
                 Section("profile/quota links", ProfileLinks);

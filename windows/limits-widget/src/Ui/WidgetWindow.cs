@@ -583,6 +583,16 @@ namespace LimitsWidget
                 Add(m, item, null, "Сбросить порядок карточек", () => { state.CardOrder = new List<string>(); state.Save(); Render(); });
             Add(m, item, null, "Тема: " + ThemeName(state.Theme), CycleTheme);
             Add(m, item, null, "Подписки…", OpenSubscriptions);
+            var pages = CardView.QuotaPages(CardOrder.Apply(snaps, state.CardOrder));
+            if (pages.Count > 0)
+            {
+                m.Items.Add(new Separator { Style = sep });
+                foreach (var pg in pages)
+                {
+                    string url = pg.Value;
+                    Add(m, item, null, pg.Key, () => OpenUrl(url));
+                }
+            }
             m.Resources["LW.Hover"] = t.Hover;   // подсветка кнопок − / +
             AddStepper(m, item, t, "Непрозрачность фона", () => Pct(state.Opacity), step =>
             {

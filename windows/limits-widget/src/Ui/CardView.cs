@@ -138,6 +138,13 @@ namespace LimitsWidget
                 down.Click += (a, b) => { if (act.MoveCard != null) act.MoveCard(id, 1); };
                 m.Items.Add(up);
                 m.Items.Add(down);
+                if (!string.IsNullOrEmpty(s.Url) && act.OpenUrl != null)
+                {
+                    string url = s.Url;
+                    var quota = new MenuItem { Header = MenuLabel("Открыть страницу лимитов"), Style = item };
+                    quota.Click += (a, b) => act.OpenUrl(url);
+                    m.Items.Add(quota);
+                }
                 m.PlacementTarget = grip;
                 m.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
                 m.IsOpen = true;
@@ -246,27 +253,22 @@ namespace LimitsWidget
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.Children.Add(Badge(s.Id, t));
 
-            // Шапка: значок · имя (сжимается с многоточием) · тариф · профиль/подписка · страница лимитов · статус/время
+            // Шапка (как в утверждённом образце): значок · имя (сжимается с многоточием) · тариф (только имя, источник — в подсказке)
+            // · одна стрелка «открыть» на страницу профиля/подписки · статус/время. Страница лимитов — в меню карточки и в «⋯».
             var title = new ShrinkFirstPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 8, 0) };
             string name = s.Title ?? s.Id;
             title.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = t.Text, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = name });
             title.Children.Add(PlanChip(s, t));
             if (act.OpenUrl != null)
             {
-                if (!string.IsNullOrEmpty(s.ProfileUrl))
+                // нет ссылки профиля (убрана в настройках) — стрелка ведёт на страницу лимитов, чтобы переход не пропал
+                bool profile = !string.IsNullOrEmpty(s.ProfileUrl);
+                string target = profile ? s.ProfileUrl : s.Url;
+                if (!string.IsNullOrEmpty(target))
                 {
-                    string profile = s.ProfileUrl;
-                    var prof = IconButton("", "Профиль и подписка " + name + " (откроется " + HostOf(profile) + ")", t, 20, 9.5);
-                    prof.Margin = new Thickness(3, 1, 0, 0);
-                    prof.Click += (o, e) => act.OpenUrl(profile);
-                    title.Children.Add(prof);
-                }
-                if (!string.IsNullOrEmpty(s.Url))
-                {
-                    string url = s.Url;
-                    var open = IconButton("", "Страница лимитов " + name + " (откроется " + HostOf(url) + ")", t, 20, 9.5);
-                    open.Margin = new Thickness(1, 1, 0, 0);
-                    open.Click += (o, e) => act.OpenUrl(url);
+                    var open = IconButton("", (profile ? "Профиль и подписка " : "Страница лимитов ") + name + " (откроется " + HostOf(target) + ")", t, 20, 9.5);
+                    open.Margin = new Thickness(3, 1, 0, 0);
+                    open.Click += (o, e) => act.OpenUrl(target);
                     title.Children.Add(open);
                 }
             }
@@ -344,14 +346,23 @@ namespace LimitsWidget
             return list;
         }
 
+        // Пункты «Страница лимитов · <сервис>» для общего меню (кнопка «⋯» и правый щелчок по карточке) — доступны с клавиатуры.
+        public static List<KeyValuePair<string, string>> QuotaPages(IList<ServiceSnapshot> snaps)
+        {
+            var res = new List<KeyValuePair<string, string>>();
+            foreach (var s in snaps)
+                if (!string.IsNullOrEmpty(s.Url)) res.Add(new KeyValuePair<string, string>("Страница лимитов · " + (s.Title ?? s.Id), s.Url));
+            return res;
+        }
+
         static string HostOf(string url)
         {
             Uri u;
             return Uri.TryCreate(url, UriKind.Absolute, out u) ? u.Host : url;
         }
 
-        // Тариф: ручной — обычный чип; автоматический — чип с пометкой «авто»; неизвестный — приглушённый контур.
-        // Источник — в подсказке; изменить — меню → «Подписки…».
+        // Тариф: известный — чип с одним именем; неизвестный — приглушённый контур «тариф?».
+        // Источник (вручную / поле провайдера / уровень аккаунта) — в подсказке и HelpText; изменить — меню → «Подписки…».
         static FrameworkElement PlanChip(ServiceSnapshot s, Theme t)
         {
             bool known = !string.IsNullOrEmpty(s.Plan);
@@ -360,7 +371,7 @@ namespace LimitsWidget
             if (known)
             {
                 chip.Background = t.ChipBg;
-                text.Text = s.Plan + (s.PlanSource == "provider" ? Fmt.Nbsp + "·" + Fmt.Nbsp + (s.AutoPlanIsLevel ? "уровень" : "авто") : "");
+                text.Text = s.Plan;   // только имя тарифа; ручной/автоматический/уровень аккаунта — в подсказке
                 text.Foreground = t.ChipText;
             }
             else
@@ -373,6 +384,7 @@ namespace LimitsWidget
             chip.Child = text;
             chip.ToolTip = PlanResolver.Describe(s);
             System.Windows.Automation.AutomationProperties.SetName(chip, (known && s.PlanSource == "provider" && s.AutoPlanIsLevel ? "Тариф: уровень аккаунта " : "Тариф: ") + (known ? s.Plan : "неизвестен"));
+            System.Windows.Automation.AutomationProperties.SetHelpText(chip, PlanResolver.Describe(s));
             return chip;
         }
 

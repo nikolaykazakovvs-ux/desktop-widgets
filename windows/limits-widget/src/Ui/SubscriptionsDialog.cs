@@ -117,6 +117,7 @@ namespace LimitsWidget
             switch (id)
             {
                 case "codex": return "из поля planType ответа Codex (появится после опроса)";
+                case "claude": return "из claude auth status --json → subscriptionType (появится после опроса; «Max» без множителя 5×/20×)";
                 case "kimi": return "уровень аккаунта из /oauth/userinfo (появится после опроса); это не подтверждение оплаченного тарифа";
                 default: return "не определяется: провайдер не сообщает тариф подтверждённым полем";
             }

@@ -43,6 +43,7 @@ namespace LimitsWidget
                 if (FillFromUsage(snap, Json.TryParse(guFix), ctx))
                 {
                     ProviderUtil.MarkFresh(snap, ctx, true);
+                    EnrichPlan(snap, ctx, null);
                     return snap;
                 }
                 Log.Write("claude get_usage (фикстура): нет rate_limits");
@@ -64,6 +65,7 @@ namespace LimitsWidget
                     if (data != null && FillFromUsage(snap, data, ctx))
                     {
                         ProviderUtil.MarkFresh(snap, ctx, false);
+                        EnrichPlan(snap, ctx, exe);
                         return snap;
                     }
                     Log.Write("claude get_usage: " + (guError ?? "rate_limits недоступны"));
@@ -130,7 +132,41 @@ namespace LimitsWidget
                     "claude /usage не вернул лимитов" + (hint != null ? ": " + hint : ""), Placeholders());
             }
             ProviderUtil.MarkFresh(snap, ctx, fixture);
+            EnrichPlan(snap, ctx, cliExe);
             return snap;
+        }
+
+        // Тариф из штатного `claude auth status --json` (поле subscriptionType) — необязательная догрузка после публикации квот:
+        // их время и статус не меняет. Ответ CLI не сохраняется и не пишется в журнал; берётся только subscriptionType.
+        // Ручной тариф главнее — тогда CLI не запускается вовсе. Нет поля/старый CLI/ошибка — тариф остаётся ручным или неизвестным.
+        static void EnrichPlan(ServiceSnapshot snap, ProviderContext ctx, string exe)
+        {
+            var cached = ctx.State != null ? ctx.State.GetCache("claude") : null;
+            if (cached != null && cached.AutoPlanSource == ClaudeAuth.Source && !string.IsNullOrEmpty(cached.AutoPlan))
+                SetAutoPlan(snap, ctx, cached.AutoPlan);   // прошлый ответ — до публикации, чтобы бейдж не мигал
+            ctx.PublishCore(snap);
+            if (!string.IsNullOrWhiteSpace(ctx.Svc.Plan)) return;
+            ClaudeAuth.Result r = null;
+            if (!string.IsNullOrEmpty(ctx.FixturesDir))
+            {
+                string fx = ProviderUtil.Fixture(ctx, "claude-auth-status.json");
+                if (fx != null) r = ClaudeAuth.Parse(fx);
+            }
+            else if (exe != null)
+            {
+                int timeout = Math.Min(ClaudeAuth.TimeoutMs, Math.Max(1, ctx.Svc.TimeoutSeconds) * 1000);
+                r = ClaudeAuth.Shared.Get(exe, ctx.UtcNow(), () => ClaudeAuth.Query(exe, timeout));
+            }
+            if (r == null || !r.Answered) return;   // нет ответа — оставить прежнее
+            SetAutoPlan(snap, ctx, r.Plan);          // ответ без тарифа или выход из аккаунта — автоматического тарифа нет
+        }
+
+        static void SetAutoPlan(ServiceSnapshot snap, ProviderContext ctx, string plan)
+        {
+            snap.AutoPlan = plan;
+            snap.AutoPlanSource = plan != null ? ClaudeAuth.Source : null;
+            snap.AutoPlanIsLevel = false;
+            PlanResolver.Apply(snap, ctx.Svc);
         }
 
         public const string LoginAction = "claude-login";

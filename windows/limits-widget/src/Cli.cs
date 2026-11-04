@@ -190,12 +190,20 @@ namespace LimitsWidget
         // В любом случае все потомки CLI убиваются при закрытии Job после опроса.
         public static CliResult Run(string exe, string args, int timeoutMs, int maxProcesses)
         {
+            return Run(exe, args, timeoutMs, maxProcesses, null);
+        }
+
+        // configure — правка окружения запуска (например, убрать переменные родительской сессии CLAUDE*).
+        public static CliResult Run(string exe, string args, int timeoutMs, int maxProcesses, Action<ProcessStartInfo> configure)
+        {
             var res = new CliResult();
             Process p;
             IntPtr job = Job.Create(maxProcesses);
             try
             {
-                p = Process.Start(StartInfo(exe, args));
+                var psi = StartInfo(exe, args);
+                if (configure != null) configure(psi);
+                p = Process.Start(psi);
                 Job.Assign(job, p);
             }
             catch (Exception ex)

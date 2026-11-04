@@ -26,10 +26,13 @@ $fakes = Join-Path $full 'fakes'
 New-Item -ItemType Directory -Force -Path $fakes | Out-Null
 $kimi = Join-Path $fakes 'kimi.exe'
 $codex = Join-Path $fakes 'codex.exe'
+$claude = Join-Path $fakes 'claude.exe'
 & $csc @common '/target:exe' "/out:$kimi" (Join-Path $PSScriptRoot 'FakeKimi.cs')
 if ($LASTEXITCODE -ne 0) { throw 'FakeKimi compilation failed' }
 & $csc @common '/target:exe' "/out:$codex" (Join-Path $PSScriptRoot 'FakeCodex.cs')
 if ($LASTEXITCODE -ne 0) { throw 'FakeCodex compilation failed' }
+& $csc @common '/target:exe' "/out:$claude" (Join-Path $PSScriptRoot 'FakeClaude.cs')
+if ($LASTEXITCODE -ne 0) { throw 'FakeClaude compilation failed' }
 
 $sources = @(Get-ChildItem -LiteralPath $src -Recurse -Filter '*.cs' | Sort-Object FullName | ForEach-Object { $_.FullName })
 $sources += Join-Path $repo 'telemetry\publisher-shared\TelemetrySnapshotWriter.cs'
@@ -38,5 +41,5 @@ $exe = Join-Path $full 'LimitsTests.exe'
 & $csc @common '/target:exe' '/main:LimitsWidget.LimitsTests' "/out:$exe" "/win32manifest:$(Join-Path $widget 'app.manifest')" @refs @sources
 if ($LASTEXITCODE -ne 0) { throw 'Test harness compilation failed' }
 
-& $exe $full $kimi $codex
+& $exe $full $kimi $codex $claude
 if ($LASTEXITCODE -ne 0) { throw "Limits tests failed (exit $LASTEXITCODE)" }
