@@ -60,7 +60,7 @@
 PowerShell из корня checkout; исполнитель — Codex. Путь результата отдельный на D:, никакая установленная копия не запускается и не останавливается. Harness компилирует реальные классы виджета и shared writer C# 5, запускает только fake providers/синтетические ответы и проверяет JSON Python reference этапа 1. Ожидаемое время около 15–25 секунд, включая настоящий 10-секундный heartbeat.
 
 ```powershell
-& .\telemetry\publisher-tests\quotas\run.ps1 -OutDir 'D:\projects\Виджеты\_work\quotas-publisher-stage3'
+& .\telemetry\publisher-tests\quotas\run.ps1 -OutDir (Join-Path (Get-Location) '.work/quotas-publisher-check')
 ```
 
 Покрытие: fast provider до завершения slow provider; completion-time вместо batch-start; cache+error с исходным временем; legacy unknown; Kimi month/code и Antigravity common pool; одновременные Accept и heartbeat без потери provider; heartbeat не меняет измерения и счётчики fake Collect; визуальный reset не изменяет факт; отсутствие canary/credit полей; missing fixtures до live paths. Каждый emitted case валидируется схемой и semantic layer. Reset-pending дополнительно вычисляется Python bridge reference.
@@ -71,4 +71,4 @@ PowerShell из корня checkout; исполнитель — Codex. Путь 
 & .\windows\limits-widget\build.ps1
 ```
 
-Финальный последовательный запуск Root после уточнения upstream provenance и общего writer прошёл: 22 C# assertions и 10 emitted quota snapshots успешно прошли JSON Schema + semantic validation reference этапа 1. Harness собирает все реальные исходники виджета и shared writer через native csc с `/langversion:5`; отдельная штатная сборка также пройдена. Независимое ревью и границы приёмки описаны в [результатах этапов 2–3](ai-telemetry-stage23-results.md). Запуск выполнен из уже работающего PowerShell 7 с действующей политикой RemoteSigned. Дочерний Windows PowerShell 5 блокировал запуск скрипта; политики не менялись. Live provider refresh, установка, автозапуск, текущие credentials и соседняя установленная копия не проверялись и не изменялись.
+Результат каждой поставки подтверждается её собственным запуском harness и проверки схемы. Синтетические тесты не подтверждают live provider refresh, установку или работу с аккаунтом пользователя.

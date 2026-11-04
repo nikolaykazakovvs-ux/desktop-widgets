@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "mode": "fixture",
+  "kind": "quotas-snapshot",
+  "source_id": "limits-widget",
+  "measured_at": null,
+  "published_at": "2026-01-01T11:59:59Z",
+  "last_attempt_at": "2026-01-01T11:58:00Z",
+  "status": "unavailable",
+  "reason": "source_unavailable",
+  "poll_interval_ms": 300000,
+  "heartbeat_interval_ms": 10000,
+  "providers": []
+}

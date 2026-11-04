@@ -1,0 +1,139 @@
+{
+  "schemaVersion": "1.0.0",
+  "mode": "fixture",
+  "generated_at": "2026-01-01T12:00:00Z",
+  "policy_version": "0.1.0",
+  "hardware_state": {
+    "status": "unavailable",
+    "reason": "source_unavailable",
+    "liveness": "unknown",
+    "freshness": "unknown",
+    "read_status": "missing",
+    "source": null,
+    "metrics": {
+      "cpu_usage_percent": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "ram_total_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "ram_available_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "commit_total_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "commit_limit_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "commit_headroom_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "vram_total_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "vram_available_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "swap_used_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "network_receive_bytes_per_second": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "network_send_bytes_per_second": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "network_reachability": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "cpu_temperature_celsius": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "gpu_temperature_celsius": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "gpu_usage_percent": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "gpu_memory_total_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "gpu_memory_available_bytes": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "gateway_rtt_ms": {
+        "freshness": "unknown",
+        "age_ms": null
+      },
+      "internet_rtt_ms": {
+        "freshness": "unknown",
+        "age_ms": null
+      }
+    },
+    "network_quality": {
+      "freshness": "unknown",
+      "age_ms": null
+    }
+  },
+  "subscription_quotas": {
+    "status": "unavailable",
+    "reason": "source_unavailable",
+    "liveness": "unknown",
+    "freshness": "unknown",
+    "read_status": "missing",
+    "source": null,
+    "windows": []
+  },
+  "api_limits": {
+    "status": "not_available",
+    "reason": "monitor_not_implemented"
+  },
+  "orchestration_hints": {
+    "policy_version": "0.1.0",
+    "resource_pressure": {
+      "physical_memory": {
+        "level": "unknown",
+        "reason": "source_unavailable",
+        "inputs": []
+      },
+      "commit_memory": {
+        "level": "unknown",
+        "reason": "source_unavailable",
+        "inputs": []
+      },
+      "vram": {
+        "level": "unknown",
+        "reason": "source_unavailable",
+        "inputs": []
+      },
+      "cpu": {
+        "level": "unknown",
+        "reason": "source_unavailable",
+        "inputs": []
+      }
+    },
+    "data_quality": [
+      "hardware_unavailable",
+      "quotas_unavailable",
+      "unknown_metrics"
+    ]
+  }
+}
