@@ -10,6 +10,7 @@ namespace LimitsWidget
 
     sealed class LimitBar
     {
+        public QuotaObservation Quota; // typed subscription facts; independent of UI labels/visual reset
         public string Chip;          // тип окна: "5 ч", "7 д", "мес"
         public string Label;         // подпись: "Неделя · все модели"
         public double? Used;         // израсходовано, 0..100; null — нет данных
@@ -22,6 +23,7 @@ namespace LimitsWidget
         public Dictionary<string, object> ToDict()
         {
             var d = new Dictionary<string, object>();
+            d["quota"] = Quota == null ? null : Quota.ToDict();
             d["chip"] = Chip;
             d["label"] = Label;
             d["used"] = Used;
@@ -36,6 +38,7 @@ namespace LimitsWidget
         public static LimitBar FromDict(object d)
         {
             var b = new LimitBar();
+            b.Quota = QuotaObservation.FromDict(Json.Get(d, "quota"));
             b.Chip = Json.Str(Json.Get(d, "chip"));
             b.Label = Json.Str(Json.Get(d, "label"));
             b.Used = Json.Num(Json.Get(d, "used"));
@@ -130,6 +133,8 @@ namespace LimitsWidget
 
     sealed class ServiceSnapshot
     {
+        public DateTime? LastAttemptAt;
+        public bool ObservationTimeUnknown;
         public string Id;
         public string Title;
         public string Plan;
@@ -149,6 +154,8 @@ namespace LimitsWidget
         public Dictionary<string, object> ToDict()
         {
             var d = new Dictionary<string, object>();
+            d["lastAttemptAt"] = LastAttemptAt;
+            d["observationTimeUnknown"] = ObservationTimeUnknown;
             d["id"] = Id;
             d["title"] = Title;
             d["plan"] = Plan;
@@ -169,6 +176,8 @@ namespace LimitsWidget
         public static ServiceSnapshot FromDict(object d)
         {
             var s = new ServiceSnapshot();
+            s.LastAttemptAt = Json.Time(Json.Get(d, "lastAttemptAt"));
+            s.ObservationTimeUnknown = Json.Bool(Json.Get(d, "observationTimeUnknown")) == true;
             s.Id = Json.Str(Json.Get(d, "id"));
             s.Title = Json.Str(Json.Get(d, "title"));
             s.Plan = Json.Str(Json.Get(d, "plan"));

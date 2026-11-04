@@ -31,6 +31,9 @@ namespace LimitsWidget
         public ServiceSnapshot Collect(ProviderContext ctx)
         {
             var snap = ProviderUtil.NewSnap(ctx, Id);
+            // get_usage and /usage can return a cached snapshot without exposing its age/source.
+            // Only the desktop-history fallback below proves an original sample timestamp.
+            snap.ObservationTimeUnknown = true;
             snap.Source = "claude -p \"/usage\" — лимиты тарифа Claude (общие для Claude Code и claude.ai)";
 
             // Основной путь — служебный запрос get_usage (лимиты, кредиты, расход по продуктам); фикстура — объект response.response.
@@ -50,6 +53,7 @@ namespace LimitsWidget
             string cliExe = null;
             if (!fixture)
             {
+                if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                 string exe = cliExe = Cli.Resolve(ctx.Svc.Command, "claude");
                 if (exe == null)
                     return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "claude не найден в PATH — укажите services.claude.command в config.json", Placeholders());
@@ -93,6 +97,10 @@ namespace LimitsWidget
                     bar.Chip = "7" + Fmt.Nbsp + "д";
                     bar.Label = scope.Equals("all models", StringComparison.OrdinalIgnoreCase) ? "Неделя · все модели" : "Неделя · " + scope;
                 }
+                string telemetryScope = m.Groups["scope"].Value.Trim().ToLowerInvariant();
+                string telemetryPool = m.Groups["what"].Value.Equals("session", StringComparison.OrdinalIgnoreCase) || telemetryScope == "all models" || telemetryScope == "" ? "subscription.general" : telemetryScope == "opus" ? "subscription.opus" : telemetryScope == "sonnet" ? "subscription.sonnet" : null;
+                bool telemetryFive = m.Groups["what"].Value.Equals("session", StringComparison.OrdinalIgnoreCase);
+                bar.Quota = QuotaObservation.Create("claude", telemetryPool, telemetryFive ? "five_hour" : "seven_day", telemetryFive ? 18000 : 604800, bar.Used, bar.ResetsAt);
                 bar.Tip = m.Value.Trim();
                 snap.Bars.Add(bar);
             }
@@ -239,6 +247,8 @@ namespace LimitsWidget
             var bar = new LimitBar { Chip = chip, Label = label };
             double? u = Util(rl, key);
             bar.Used = u ?? 0;
+            var pool = key == "five_hour" || key == "seven_day" ? "subscription.general" : key == "seven_day_opus" ? "subscription.opus" : key == "seven_day_sonnet" ? "subscription.sonnet" : key == "seven_day_cowork" ? "subscription.cowork" : key == "seven_day_oauth_apps" ? "subscription.oauth_apps" : null;
+            bar.Quota = QuotaObservation.Create("claude", pool, key == "five_hour" ? "five_hour" : "seven_day", key == "five_hour" ? 18000 : 604800, u, Json.Time(Json.Get(w, "resets_at")));
             bar.ResetsAt = Json.Time(Json.Get(w, "resets_at"));
             if (!u.HasValue) bar.Note = "окно не открыто";
             return bar;
@@ -247,6 +257,9 @@ namespace LimitsWidget
         // Разбор ответа get_usage; false — нет rate_limits (тогда snap не тронут).
         static bool FillFromUsage(ServiceSnapshot snap, object data, ProviderContext ctx)
         {
+            // Current upstream get_usage erases cached-vs-network provenance (even status ok).
+            // Neither absence nor a textual value of cache_status proves a new observation.
+            snap.ObservationTimeUnknown = true;
             if (data == null || Json.Bool(Json.Get(data, "rate_limits_available")) == false) return false;
             object rl = Json.Get(data, "rate_limits");
             var rlObj = Json.Obj(rl);
@@ -469,6 +482,14 @@ namespace LimitsWidget
                 if (sd.HasValue)
                     snap.Bars.Add(new LimitBar { Chip = "7" + Fmt.Nbsp + "д", Label = "Неделя · все модели", Used = sd.Value });
                 snap.DataTime = t;
+                snap.ObservationTimeUnknown = true;
+                for (int i = 0; i < snap.Bars.Count; i++)
+                {
+                    var bar = snap.Bars[i];
+                    bool five = fh.HasValue && i == 0;
+                    bar.Quota = QuotaObservation.Create("claude", "subscription.general", five ? "five_hour" : "seven_day", five ? 18000 : 604800, bar.Used, null);
+                    if (bar.Quota != null) bar.Quota.MeasuredAt = t.Value.ToUniversalTime();
+                }
                 snap.Source = "приложение Claude (plan-usage-history.json) — запасной источник, пока у CLI нет входа";
                 return true;
             }

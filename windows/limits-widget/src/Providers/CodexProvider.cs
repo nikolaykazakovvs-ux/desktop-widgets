@@ -29,6 +29,7 @@ namespace LimitsWidget
             }
             else
             {
+                if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                 string exe = ResolveCodex(ctx.Svc);
                 if (exe == null)
                     return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "codex не найден в PATH", Placeholder());
@@ -59,8 +60,8 @@ namespace LimitsWidget
                 string model = Json.Str(Json.Get(l, "normalModelSlug"));
                 // Дополнительные пулы (например, gpt-reserve) кабинет OpenAI не показывает — выводим их, только когда они расходуются.
                 if (name != null && !InUse(l)) continue;
-                AddWindow(snap, Json.Get(l, "primary"), name, model, ctx.Now);
-                AddWindow(snap, Json.Get(l, "secondary"), name, model, ctx.Now);
+                AddWindow(snap, Json.Get(l, "primary"), name, model, ctx.Now, id);
+                AddWindow(snap, Json.Get(l, "secondary"), name, model, ctx.Now, id);
             }
 
             var head = limits.FirstOrDefault();
@@ -77,7 +78,7 @@ namespace LimitsWidget
             return snap;
         }
 
-        static void AddWindow(ServiceSnapshot snap, object w, string name, string model, DateTime now)
+        static void AddWindow(ServiceSnapshot snap, object w, string name, string model, DateTime now, string limitId)
         {
             if (Json.Obj(w) == null) return;
             double? mins = Json.Num(Json.Get(w, "windowDurationMins"));
@@ -93,6 +94,7 @@ namespace LimitsWidget
             else
                 bar.Label = name + " · " + ProviderUtil.WindowWord(mins);
             bar.Used = Json.Num(Json.Get(w, "usedPercent"));
+            bar.Quota = QuotaObservation.Create("codex", limitId == "codex" ? "subscription.general" : limitId == "gpt-reserve" ? "subscription.reserve" : null, QuotaObservation.Window(mins), mins.HasValue ? (long?)(mins.Value * 60) : null, bar.Used, Json.Time(Json.Get(w, "resetsAt")));
             bar.ResetsAt = Json.Time(Json.Get(w, "resetsAt"));
             if (!string.IsNullOrEmpty(model)) bar.Tip = (bar.Tip != null ? bar.Tip + "\n" : "") + "Модель: " + model;
             ProviderUtil.MarkIdle(bar, now, mins);

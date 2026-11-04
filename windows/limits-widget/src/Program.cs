@@ -17,6 +17,8 @@ namespace LimitsWidget
 {
     sealed class CliOptions
     {
+        public string TelemetryDir;
+        public bool TelemetryFixture;
         public string DumpPath;     // --dump out.json : собрать данные один раз и выйти
         public string RenderPath;   // --render out.png : отрисовать карточку в PNG и выйти
         public string FixturesDir;  // --fixtures dir  : подставить тестовые ответы вместо живых источников
@@ -36,6 +38,8 @@ namespace LimitsWidget
                 string next = i + 1 < args.Length ? args[i + 1] : null;
                 switch (args[i])
                 {
+                    case "--telemetry-dir": o.TelemetryDir = next; i++; break;
+                    case "--telemetry-fixture": o.TelemetryFixture = true; break;
                     case "--dump": o.DumpPath = next; i++; break;
                     case "--render": o.RenderPath = next; i++; break;
                     case "--fixtures": o.FixturesDir = next; i++; break;

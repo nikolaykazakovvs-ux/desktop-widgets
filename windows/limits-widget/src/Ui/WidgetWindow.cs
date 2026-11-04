@@ -26,6 +26,7 @@ namespace LimitsWidget
         readonly Config cfg;
         readonly State state;
         readonly Collector collector;
+        readonly TelemetryPublisher telemetry;
         readonly DispatcherTimer timer = new DispatcherTimer();
         readonly string exePath;
         readonly TrayIcon tray;
@@ -43,8 +44,17 @@ namespace LimitsWidget
             this.opts = opts;
             exePath = Assembly.GetExecutingAssembly().Location;
             cfg = Config.Load(opts.ConfigPath ?? Path.Combine(Program.BaseDir, "config.json"));
+            if (opts.TelemetryFixture && (string.IsNullOrEmpty(opts.ConfigPath) || string.IsNullOrEmpty(opts.StatePath)))
+                throw new ArgumentException("telemetry_fixture_requires_isolated_config_and_state");
             state = State.Load(opts.StatePath ?? Path.Combine(Program.BaseDir, "state.json"));
-            collector = new Collector(cfg, state, opts.FixturesDir);
+            // Headless paths do not construct WidgetWindow. Fixture publication needs both explicit mode and isolated directory.
+            if (opts.TelemetryFixture && (string.IsNullOrEmpty(opts.FixturesDir) || string.IsNullOrEmpty(opts.TelemetryDir)))
+                throw new ArgumentException("telemetry_fixture_requires_fixtures_and_directory");
+            if (!string.IsNullOrEmpty(opts.FixturesDir) && !opts.TelemetryFixture)
+                throw new ArgumentException("fixture_publication_requires_explicit_mode");
+            try { telemetry = new TelemetryPublisher(opts.TelemetryDir, opts.TelemetryFixture, cfg.RefreshSeconds); }
+            catch (Exception ex) { Log.Write("telemetry publisher: " + ex.GetType().Name); }
+            collector = new Collector(cfg, state, opts.FixturesDir, telemetry, null, null);
             cardDrag = new CardDrag(OnCardsReordered);
 
             Title = "Лимиты нейросетей";
@@ -75,6 +85,7 @@ namespace LimitsWidget
             Closed += (s, e) =>
             {
                 timer.Stop();
+                if (telemetry != null) telemetry.Dispose();
                 SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
                 SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
                 if (hotkey != null) hotkey.Dispose();

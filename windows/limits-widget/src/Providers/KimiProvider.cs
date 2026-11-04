@@ -57,6 +57,8 @@ namespace LimitsWidget
             if (fx != null)
             {
                 snap.Source = ServerSource;
+                // Current server route awaits fetchManagedUsage; success is a new source query.
+                // Token refresh/liveness timestamps are never used as quota observations.
                 string ferr;
                 var fq = ParseServer(Json.TryParse(fx), out ferr);
                 if (fq == null)
@@ -73,6 +75,7 @@ namespace LimitsWidget
                 return snap;
             }
 
+            if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
             string home = KimiHome();
 
             // 1) локальный сервер приложения
@@ -88,6 +91,8 @@ namespace LimitsWidget
             if (q != null)
             {
                 snap.Source = ServerSource;
+                // Current server route awaits fetchManagedUsage; success is a new source query.
+                // Token refresh/liveness timestamps are never used as quota observations.
                 Fill(snap, q);
                 ProviderUtil.MarkFresh(snap, ctx, false);
                 return snap;
@@ -347,11 +352,11 @@ namespace LimitsWidget
 
         static void Fill(ServiceSnapshot snap, KimiQuota q)
         {
-            var h5 = Add(snap, q.Limit5h, "5" + Fmt.Nbsp + "ч", "Окно 5 часов · только Kimi Code");
+            var h5 = Add(snap, q.Limit5h, "5" + Fmt.Nbsp + "ч", "Окно 5 часов · только Kimi Code", "subscription.code", "five_hour", 18000);
             if (h5 != null) h5.Tip = "Лимит 5 часов действует только для Kimi Code.";
-            var d7 = Add(snap, q.Limit7d, "7" + Fmt.Nbsp + "д", "Неделя · только Kimi Code");
+            var d7 = Add(snap, q.Limit7d, "7" + Fmt.Nbsp + "д", "Неделя · только Kimi Code", "subscription.code", "seven_day", 604800);
             if (d7 != null) d7.Tip = "Недельный лимит — только для Kimi Code (у старых тарифов).";
-            var month = Add(snap, q.MonthTotal, "мес", "Месяц · общий лимит подписки");
+            var month = Add(snap, q.MonthTotal, "мес", "Месяц · общий лимит подписки", "subscription.shared", "month", null);
             if (month != null)
             {
                 month.Tip = TipMonth;
@@ -395,10 +400,11 @@ namespace LimitsWidget
             return e;
         }
 
-        static LimitBar Add(ServiceSnapshot snap, Entry entry, string chip, string label)
+        static LimitBar Add(ServiceSnapshot snap, Entry entry, string chip, string label, string pool, string window, long? duration)
         {
             if (entry == null) return null;
             var bar = new LimitBar { Chip = chip, Label = label, Used = entry.UsedRatio * 100, ResetsAt = entry.ResetAt };
+            bar.Quota = QuotaObservation.Create("kimi", pool, window, duration, bar.Used, bar.ResetsAt);
             snap.Bars.Add(bar);
             return bar;
         }

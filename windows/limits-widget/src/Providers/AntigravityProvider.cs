@@ -19,6 +19,7 @@ namespace LimitsWidget
             bool fixture = text != null;
             if (!fixture)
             {
+                if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                 string exe = Cli.Resolve(ctx.Svc.Command, "agy");
                 if (exe == null)
                     return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "agy (Antigravity CLI) не найден в PATH", Placeholders());
@@ -131,6 +132,7 @@ namespace LimitsWidget
                 case "weekly": bar.Chip = "7" + Fmt.Nbsp + "д"; bar.Label = g + " · неделя"; break;
                 default: bar.Chip = window ?? "?"; bar.Label = g; break;
             }
+            bar.Quota = QuotaObservation.Create("antigravity", group.Equals("Gemini Models", StringComparison.OrdinalIgnoreCase) ? "subscription.gemini" : group.Equals("Claude and GPT models", StringComparison.OrdinalIgnoreCase) ? "subscription.claude_gpt" : null, window == "5h" ? "five_hour" : window == "weekly" ? "seven_day" : window == "daily" ? "daily" : null, WindowMinutes(window).HasValue ? (long?)(WindowMinutes(window).Value * 60) : null, (1 - remaining) * 100, reset);
             bar.Used = Math.Max(0, Math.Min(1, 1 - remaining)) * 100;
             bar.ResetsAt = reset;
             bar.Tip = tip;
