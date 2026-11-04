@@ -1,20 +1,20 @@
 # Desktop Widgets
 
-[Русский](README.ru.md) · [Project page](https://nikolaykazakovvs-ux.github.io/desktop-widgets/) · [Download v0.1.1](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.1)
+[Русский](README.ru.md) · [Project page](https://nikolaykazakovvs-ux.github.io/desktop-widgets/) · [AI Limits 1.1 guide](docs/limits-widget.md) · [Download v0.2.0 / v0.1.1](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases)
 
-Two independent Windows widgets. **System Resources** monitors your computer and keeps a detailed network journal. **AI Limits** shows subscription usage windows and reset times. Use either on its own. Native C# and Windows Presentation Foundation (WPF); the application interface is currently Russian.
+Two independent Windows widgets. **System Resources** monitors your computer and keeps a detailed network journal. **AI Limits** shows subscription usage windows, reset times, credits and token activity. Use either on its own. Native C# and Windows Presentation Foundation (WPF); the application interface is currently Russian.
 
 ## Download and run
 
-Public alpha collection: **v0.1.1**. Requirements: **Windows 10/11 x64 and .NET Framework 4.8**. macOS and Linux are planned separately; neither has an implementation or download yet.
+Public prerelease collection: **v0.2.0** (AI Limits 1.1.0) and **v0.1.1** (System Resources 1.1.1). Requirements: **Windows 10/11 x64 and .NET Framework 4.8**. macOS and Linux are planned separately; neither has an implementation or download yet.
 
 | Application | Download | Start |
 | --- | --- | --- |
 | System Resources 1.1.1 | [Windows installer](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.1/ResourcesWidgetSetup-1.1.1-x64.exe) | Open the installer; it shows the card after installation |
 | System Resources 1.1.1 | [Portable ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.1/ResourcesWidget-1.1.1-win-x64.zip) | Extract to a writable folder and open ResourcesWidget.exe |
-| AI Limits 1.0.0 | [ZIP](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.1.1/LimitsWidget-1.0.0-win.zip) | Extract, open LimitsWidget.exe, then enable the sources you need |
+| AI Limits 1.1.0 | [ZIP (v0.2.0)](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/download/v0.2.0/LimitsWidget-1.1.0-win-x64.zip) | Extract to a writable folder (or update via `update-limits-widget.ps1`), open LimitsWidget.exe, then enable the sources you need |
 
-[Release notes, assets and SHA-256 checksums](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.1). Applications and installer are unsigned; Windows may warn about an unknown publisher. Follow your organisation's policies on managed computers.
+[AI Limits v0.2.0 release notes and SHA-256 checksums](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.2.0) · [System Resources v0.1.1 release notes and SHA-256 checksums](https://github.com/nikolaykazakovvs-ux/desktop-widgets/releases/tag/v0.1.1). Applications and installer are unsigned; Windows may warn about an unknown publisher. Follow your organisation's policies on managed computers.
 
 The resources installer installs for the current user into a new/empty dedicated folder or a verified existing installation, adds shortcuts and an uninstall entry, and preserves configuration and window state on upgrade. **Startup and the local temperature sensor are opt-in.** Uninstall removes known application binaries while preserving settings, network history and unrelated files.
 
@@ -66,22 +66,22 @@ On 18 October 2026, the optional helper was installed on a real Windows host usi
 
 ## AI Limits
 
-Claude Code, Kimi Code, Antigravity and GPT / Codex in one card: available usage windows, reset times, credits and extra usage when a source returns them. A failed refresh can retain a previous snapshot marked stale. Missing data is not interpreted as zero usage.
+Claude Code, Kimi Code, Antigravity and GPT / Codex in one card: available usage windows, reset times, credits, extra usage and 7-day Codex token activity when a source returns them. Each provider header displays the service icon and title, a subscription badge with provenance tooltip (`manual > confirmed provider field > unknown`), separate quota (`url`) and verified account/billing (`profileUrl`) links with copy support, and observation status/time. A failed refresh retains a previous valid snapshot marked stale (`lastGood` is tracked separately from `latestAttempt`). Missing data is never interpreted as zero usage.
 
 [![AI Limits: actual application with test data](docs/images/limits-card.png)](docs/images/limits-card.png)
 
 Actual application interface; demo data. No personal account snapshot is shown.
 
-**All providers are disabled by default**, including when configuration is absent. Enabled providers refresh automatically (default 300 seconds, minimum 60). Sign in through the installed provider application or command-line interface (CLI), then enable only the required services.<provider>.enabled field in local config.json. An optional command field selects the installed CLI. Do not put credentials in configuration.
+**All providers are disabled by default**, including when configuration is absent. Enabled providers refresh automatically (default 300 seconds, minimum 60) and publish results to the card and local telemetry as each provider completes. Sign in through the installed provider application or command-line interface (CLI), then enable the required sources via the native **“Подписки…” (Subscriptions)** dialog in the menu or `services.<provider>.enabled` in local `config.json`. An optional `command` field selects the installed CLI. Do not put credentials in configuration. See the [AI Limits 1.1 guide and reversible update instructions](docs/limits-widget.md).
 
-| Provider | Implemented source and access |
+| Provider | Implemented source, plan provenance and links |
 | --- | --- |
-| Claude Code | Installed claude CLI: streaming get_usage request with /usage fallback. If CLI authentication is missing, may read the Claude desktop application's local usage cache. A user-triggered login action launches CLI authentication. |
-| GPT / Codex | codex app-server and account/rateLimits/read; authentication belongs to the CLI. |
-| Antigravity | agy /usage and /credits; needs a compatible installed CLI and its authentication. |
-| Kimi Code | Running local application server and its server.token for authenticated loopback requests. This server token is read even when allowLocalTokens is false. Enabling allowLocalTokens permits an OAuth access-token fallback using local Kimi credential files and the configured endpoint. The widget does not refresh that token itself. |
+| Claude Code | Installed `claude` CLI: streaming `get_usage` request with `/usage` fallback. If CLI authentication is missing, may read the Claude desktop application's local usage cache. Model-scoped weekly windows keep confirmed adapter pool identity; missing `utilization` stays unknown rather than `0%`. Default links: usage `https://claude.ai/settings/usage`, billing `https://claude.ai/settings/billing`. Plan label is manual unless a confirmed provider field is present. |
+| GPT / Codex | `codex app-server`: subscription windows via `account/rateLimits/read` (including automatic `planType` when reported) and optional account-wide 7-day token activity via `account/usage/read` on the same process (daily buckets plus expandable `lifetimeTokens`, `peakDailyTokens`, `currentStreakDays`, `longestStreakDays`, `longestRunningTurnSec`, kept separate from quota telemetry). Default links: usage `https://chatgpt.com/codex/settings/usage`, account `https://chatgpt.com/#settings/Account`. |
+| Antigravity | `agy /usage` for quota windows and decoupled `/credits` check (separate 15-minute cache and 10-second timeout). Default subscriptions link: `https://myaccount.google.com/payments-and-subscriptions`. Plan label is manual unless a confirmed provider field is present. |
+| Kimi Code | Probes live local loopback servers from Kimi's instance registry first, with bounded fallback across candidates. When enabled and no usable server responds, can start an owned headless `kimi web --no-open` server without a browser or console window (foreign servers are never stopped; the widget's own server tree stops on widget exit). `userLevelName` is shown as level, not payment proof. Enabling `allowLocalTokens` permits an opt-in OAuth access-token fallback to `baseUrl`; native `kimi` owns authentication and token renewal. |
 
-allowLocalTokens controls only Kimi's direct fallback, not all authentication access. It is disabled in the distribution. Do not use an untrusted baseUrl: the direct fallback sends its bearer token there. Provider application compatibility can change; this is an independent project.
+`allowLocalTokens` controls only Kimi's direct fallback, not all authentication access. It is disabled (`false`) in the distribution. Do not use an untrusted `baseUrl`: the direct fallback sends its bearer token there. For existing installations, `scripts/update-limits-widget.ps1` (also bundled in the ZIP) validates `package-manifest.json` and SHA-256 checksums before mutation, stops only the exact target `LimitsWidget.exe` process tree, preserves `config.json` and `state.json` (including unknown fields), safely archives legacy `src/` and `build.ps1`, and supports `-DryRun` and `-RollbackFromBackup`. Provider application compatibility can change; this is an independent project.
 
 ## Data and privacy
 
@@ -99,6 +99,8 @@ Run in Windows PowerShell from the repository root; intended for developers or t
 powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\resources-widget\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\limits-widget\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\resources-widget\installer\build-setup.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-limits-release.ps1 -OutputDirectory .\artifacts\limits-release
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-limits-release.ps1 -ArtifactsDirectory .\artifacts\limits-release -ResultsDirectory .\artifacts\limits-test-results
 ```
 
 Application build scripts do not stop a running widget or overwrite existing config.json. Building the installer with its helper requires pinned LibreHardwareMonitor dependencies and the official signed PawnIO installer; preserve their checksums and redistribution notices. Do not query personal accounts during ordinary automated checks. See [contribution guidance](CONTRIBUTING.md).
