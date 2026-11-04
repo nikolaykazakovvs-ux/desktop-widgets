@@ -388,41 +388,67 @@ namespace LimitsWidget
             return chip;
         }
 
-        // Статистика Codex: 7 дней по дням и сумма, подробности раскрываются кнопкой. Время — своё (не время квот).
+        // Статистика Codex в главной карточке — только компактная строка-кнопка: сумма за 7 дней и «Подробнее».
+        // График и подробные показатели открываются в отдельном окне (ActivityPopup), карточка не растёт.
         static FrameworkElement ActivityTile(TokenActivity a, Theme t, DateTime now, CardActions act, bool compact)
         {
             Color accent = t.Info;
-            var tile = new Border
-            {
-                CornerRadius = new CornerRadius(8),
-                Padding = compact ? new Thickness(9, 5, 9, 6) : new Thickness(10, 7, 10, 8),
-                Background = new SolidColorBrush(Color.FromArgb(t.Dark ? (byte)0x1A : (byte)0x10, accent.R, accent.G, accent.B)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(t.Dark ? (byte)0x40 : (byte)0x30, accent.R, accent.G, accent.B)),
-                BorderThickness = new Thickness(1)
-            };
-            var stack = new StackPanel();
-            var week = a.LastWeek(Fmt.Local(now).Date);
-            long? total = null;
-            if (week != null) foreach (var d in week) if (d.Tokens.HasValue) total = (total ?? 0) + d.Tokens.Value;
-
+            long? total = WeekTotal(a, now);
             var row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 14, Foreground = new SolidColorBrush(accent), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-            var label = new TextBlock { Text = "Активность Codex · 7 дней", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = t.Text, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            row.Children.Add(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 13, Foreground = new SolidColorBrush(accent), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            var label = new TextBlock { Text = "Активность Codex · 7 дней · " + (total.HasValue ? Fmt.Tokens(total.Value) : "—") + (a.Stale ? " · устарело" : ""),
+                FontSize = 11.5, Foreground = a.Stale ? new SolidColorBrush(t.Warn) : (Brush)t.Text2, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
             Grid.SetColumn(label, 1);
             row.Children.Add(label);
-            var value = new TextBlock { Text = total.HasValue ? Fmt.Tokens(total.Value) : "—", FontFamily = DisplayFont, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = total.HasValue ? t.Text : t.Muted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
-            value.ToolTip = total.HasValue ? CreditStats.Number(total.Value) + " токенов за известные дни недели" : "Дневных значений нет";
-            Grid.SetColumn(value, 2);
+            if (act.ToggleActivity != null)
+            {
+                var open = new Button { Style = IconButtonStyle(), Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
+                open.Content = new TextBlock { Text = "Подробнее", FontSize = 10.5, Foreground = new SolidColorBrush(accent) };
+                open.ToolTip = "Показать подробную статистику Codex";
+                System.Windows.Automation.AutomationProperties.SetName(open, "Показать подробную статистику Codex");
+                open.Click += (o, e) => act.ToggleActivity();
+                Grid.SetColumn(open, 2);
+                row.Children.Add(open);
+            }
+            row.ToolTip = (a.MeasuredAt.HasValue ? "данные " + Fmt.When(a.MeasuredAt.Value, now) : "время неизвестно") + " · статистика отдельна от лимитов тарифа";
+            return row;
+        }
+
+        static long? WeekTotal(TokenActivity a, DateTime now)
+        {
+            var week = a.LastWeek(Fmt.Local(now).Date);
+            long? total = null;
+            if (week != null) foreach (var d in week) if (d.Tokens.HasValue) total = (total ?? 0) + d.Tokens.Value;
+            return total;
+        }
+
+        // Содержимое окна подробной статистики: сумма, 7 столбиков по дням, время данных и показатели. null — «—», не ноль.
+        public static FrameworkElement ActivityDetails(TokenActivity a, Theme t, DateTime now)
+        {
+            Color accent = t.Info;
+            var stack = new StackPanel { Width = 300 };
+            long? total = WeekTotal(a, now);
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = "Активность Codex · 7 дней", FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = t.Text, VerticalAlignment = VerticalAlignment.Center });
+            var value = new TextBlock { Text = total.HasValue ? Fmt.Tokens(total.Value) : "—", FontFamily = DisplayFont, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = total.HasValue ? t.Text : t.Muted, Margin = new Thickness(8, 0, 0, 0) };
+            Grid.SetColumn(value, 1);
             row.Children.Add(value);
             stack.Children.Add(row);
-
-            if (week != null) stack.Children.Add(WeekChart(week, t, accent));
-
+            var week = a.LastWeek(Fmt.Local(now).Date);
+            if (week != null)
+            {
+                var chart = (FrameworkElement)WeekChart(week, t, accent);
+                chart.Margin = new Thickness(0, 8, 0, 0);
+                stack.Children.Add(chart);
+            }
             string when = a.MeasuredAt.HasValue ? "данные " + Fmt.When(a.MeasuredAt.Value, now) : "время неизвестно";
             if (a.Stale) when += " · последний запрос статистики не удался";
+            stack.Children.Add(new TextBlock { Text = when, FontSize = 10.5, Foreground = a.Stale ? new SolidColorBrush(t.Warn) : (Brush)t.Text2, Margin = new Thickness(0, 5, 0, 4), TextWrapping = TextWrapping.Wrap });
             var details = new List<KeyValuePair<string, string>>
             {
                 new KeyValuePair<string, string>("Всего токенов", a.LifetimeTokens.HasValue ? CreditStats.Number(a.LifetimeTokens.Value) : "—"),
@@ -431,52 +457,52 @@ namespace LimitsWidget
                 new KeyValuePair<string, string>("Самая длинная серия", a.LongestStreakDays.HasValue ? a.LongestStreakDays.Value + Fmt.Nbsp + "дн." : "—"),
                 new KeyValuePair<string, string>("Самый долгий ход", a.LongestRunningTurnSec.HasValue ? Fmt.Duration(a.LongestRunningTurnSec.Value) : "—")
             };
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            for (int i = 0; i < details.Count; i++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                var k = new TextBlock { Text = details[i].Key, FontSize = 11, Foreground = t.Text2, Margin = new Thickness(0, 1, 0, 1) };
+                var v = new TextBlock { Text = details[i].Value, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = details[i].Value == "—" ? t.Muted : t.Text, Margin = new Thickness(8, 1, 0, 1) };
+                Typography.SetNumeralAlignment(v, FontNumeralAlignment.Tabular);
+                Grid.SetRow(k, i);
+                Grid.SetRow(v, i);
+                Grid.SetColumn(v, 1);
+                grid.Children.Add(k);
+                grid.Children.Add(v);
+            }
+            stack.Children.Add(grid);
+            stack.Children.Add(new TextBlock { Text = "Статистика всего аккаунта; отдельна от лимитов тарифа. Пропущенный день — нет данных, а не ноль.",
+                FontSize = 10, Foreground = t.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+            return stack;
+        }
 
-            if (compact)
+        // Подложка окна статистики (как у карточки); close — кнопка закрытия (null в экспорте).
+        public static Border ActivityPanel(TokenActivity a, Theme t, DateTime now, Action close)
+        {
+            var host = new Grid();
+            var details = ActivityDetails(a, t, now);
+            host.Children.Add(details);
+            if (close != null)
             {
-                tile.ToolTip = when + "\n" + string.Join("\n", details.Select(kv => kv.Key + ": " + kv.Value));
+                details.Margin = new Thickness(0, 0, 24, 0);
+                var x = IconButton("", "Закрыть статистику (Esc)", t, 22, 10);
+                x.HorizontalAlignment = HorizontalAlignment.Right;
+                x.VerticalAlignment = VerticalAlignment.Top;
+                x.Margin = new Thickness(0, -4, -6, 0);
+                x.Click += (o, e) => close();
+                host.Children.Add(x);
             }
-            else
-            {
-                var foot = new Grid { Margin = new Thickness(22, 4, 0, 0) };
-                foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                foot.Children.Add(new TextBlock { Text = when, FontSize = 10.5, Foreground = a.Stale ? new SolidColorBrush(t.Warn) : (Brush)t.Text2, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
-                if (act.ToggleActivity != null)
-                {
-                    var toggle = new Button { Style = IconButtonStyle(), Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0) };
-                    toggle.Content = new TextBlock { Text = act.ActivityExpanded ? "Свернуть" : "Подробнее", FontSize = 10.5, Foreground = new SolidColorBrush(accent) };
-                    string tipText = act.ActivityExpanded ? "Свернуть подробную статистику Codex" : "Показать подробную статистику Codex";
-                    toggle.ToolTip = tipText;
-                    System.Windows.Automation.AutomationProperties.SetName(toggle, tipText);
-                    toggle.Click += (o, e) => act.ToggleActivity();
-                    Grid.SetColumn(toggle, 1);
-                    foot.Children.Add(toggle);
-                }
-                stack.Children.Add(foot);
-                if (act.ActivityExpanded || act.ToggleActivity == null)
-                {
-                    var grid = new Grid { Margin = new Thickness(22, 4, 0, 0) };
-                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    for (int i = 0; i < details.Count; i++)
-                    {
-                        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                        var k = new TextBlock { Text = details[i].Key, FontSize = 10.5, Foreground = t.Text2, Margin = new Thickness(0, 1, 0, 1) };
-                        var v = new TextBlock { Text = details[i].Value, FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = details[i].Value == "—" ? t.Muted : t.Text, Margin = new Thickness(8, 1, 0, 1) };
-                        Typography.SetNumeralAlignment(v, FontNumeralAlignment.Tabular);
-                        Grid.SetRow(k, i);
-                        Grid.SetRow(v, i);
-                        Grid.SetColumn(v, 1);
-                        grid.Children.Add(k);
-                        grid.Children.Add(v);
-                    }
-                    stack.Children.Add(grid);
-                }
-                tile.ToolTip = "Статистика использования Codex по всему аккаунту (account/usage/read). Отдельна от лимитов тарифа; пропущенный день — нет данных, а не ноль.";
-            }
-            tile.Child = stack;
-            return tile;
+            var p = Panel(t, 1.0, new Thickness(14, 10, 14, 12));
+            p.Margin = new Thickness(12);
+            p.Child = host;
+            p.Resources["LW.Hover"] = t.Hover;
+            p.Resources["LW.Focus"] = t.Focus;
+            TextElement.SetForeground(p, t.Text);
+            TextElement.SetFontFamily(p, UiFont);
+            TextOptions.SetTextFormattingMode(p, TextFormattingMode.Display);
+            return p;
         }
 
         // Семь столбиков по дням; день без значения — пустое место с чёрточкой (не нулевой столбик).

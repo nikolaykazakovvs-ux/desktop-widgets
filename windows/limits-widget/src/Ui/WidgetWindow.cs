@@ -84,8 +84,6 @@ namespace LimitsWidget
             Closing += (s, e) => SavePosition();
             // скрытая карточка не перестраивается; при показе — сразу свежая отрисовка
             IsVisibleChanged += (s, e) => { if (IsVisible) Render(); };
-            // перенесли окно (в том числе на другой монитор) — пересчитать допустимую высоту
-            LocationChanged += (s, e) => { if (viewport != null) viewport.MaxHeight = Viewport.MaxHeight(Viewport.WorkArea(this), Top); };
             Closed += (s, e) =>
             {
                 timer.Stop();
@@ -180,36 +178,37 @@ namespace LimitsWidget
             var actions = new CardActions { Refresh = Refresh, Menu = a => OpenMenu(a, false), OpenUrl = OpenUrl, Run = RunAction, TogglePin = ToggleTopmost, Minimize = HideToTray, Pinned = state.Topmost, CycleTheme = CycleTheme, ThemeMode = state.Theme };
             actions.BeginDrag = (id, card, e) => cardDrag.Attach((StackPanel)card.Parent, card, e);
             actions.MoveCard = MoveCard;
-            actions.ActivityExpanded = state.ActivityExpanded;
-            actions.ToggleActivity = () => { state.ActivityExpanded = !state.ActivityExpanded; state.Save(); Render(); };
+            actions.ToggleActivity = OpenActivity;   // state.activityExpanded больше не раскрывает карточку (поле сохраняется как есть)
             var view = CardView.Build(shown, theme, DateTime.Now, updatedAt, busy, actions, state.Compact, state.Opacity);
             if (Math.Abs(state.Scale - 1) > 0.01) view.LayoutTransform = new ScaleTransform(state.Scale, state.Scale);
-            // карточка в постоянном ScrollViewer: позиция прокрутки переживает перерисовку каждые 30 с
-            if (viewport == null) viewport = Viewport.Create();
-            double offset = viewport.VerticalOffset;
-            viewport.Content = view;
-            if (!ReferenceEquals(Content, viewport)) Content = viewport;
-            FitViewport();
-            if (offset > 0) viewport.ScrollToVerticalOffset(offset);
+            Content = view;
+            UpdateActivityPopup();
             renders++;
         }
 
         int renders;
-        ScrollViewer viewport;
+        ActivityPopup activityPopup;
 
-        // Не выше рабочей области своего монитора: лишнее — в прокрутку. Окно, вылезшее за низ, сдвигается вверх.
-        void FitViewport()
+        // Подробная статистика Codex — отдельное небольшое окно-владелец, главная карточка не растёт.
+        void OpenActivity()
         {
-            if (viewport == null) return;
-            var work = Viewport.WorkArea(this);
-            viewport.MaxHeight = Viewport.MaxHeight(work, Top);
-            if (!IsVisible) return;
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (!IsVisible || ActualHeight <= 0) return;
-                double top = Viewport.Fit(work, Top, ActualHeight);
-                if (Math.Abs(top - Top) > 0.5) Top = top;
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
+            var codex = snaps.Find(s => s.Id == "codex");
+            if (codex == null || codex.Activity == null) return;
+            if (activityPopup != null) { activityPopup.Activate(); return; }
+            var t = theme ?? Theme.Resolve(state.Theme);
+            activityPopup = new ActivityPopup(this, t, state.Scale);
+            activityPopup.Closed += (s, e) => activityPopup = null;
+            activityPopup.Update(codex.Activity, t, DateTime.Now);
+            activityPopup.ShowNear(this);
+        }
+
+        // Обновление данных: открытое окно статистики получает свежий снимок (или закрывается, если статистики больше нет).
+        void UpdateActivityPopup()
+        {
+            if (activityPopup == null) return;
+            var codex = snaps.Find(s => s.Id == "codex");
+            if (codex == null || codex.Activity == null) { activityPopup.Close(); return; }
+            activityPopup.Update(codex.Activity, theme, DateTime.Now);
         }
         internal int RenderCount { get { return renders; } }
 
@@ -507,6 +506,7 @@ namespace LimitsWidget
                 Native.SetForegroundWindow(previousForeground);
             previousForeground = IntPtr.Zero;
             SavePosition();
+            if (activityPopup != null) activityPopup.Close();
             Hide();
             state.Hidden = true;
             state.Save();

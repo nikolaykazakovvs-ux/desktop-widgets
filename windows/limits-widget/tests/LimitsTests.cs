@@ -673,68 +673,61 @@ namespace LimitsWidget
             Program.BaseDir = output;
         }
 
-        // Окно не выше рабочей области монитора: при 150–200 % и развёрнутой статистике — прокрутка, данные не теряются.
-        static void ViewportBounds()
+        // Оператор: виджет без прокрутки; статистика Codex — компактная кнопка в карточке и отдельное окно.
+        static void ActivityPopupChecks()
         {
-            var work = new Rect(0, 0, 1536, 816);   // виртуальная рабочая область 1920×1080 при 125 % (DIP), панель задач снизу
-            Check(Math.Abs(Viewport.MaxHeight(work, 8) - 800) < 0.01, "max height from window top to work bottom");
-            Check(Viewport.MaxHeight(work, 700) >= Viewport.MinHeight, "near bottom: never below minimum");
-            Check(Math.Abs(Viewport.MaxHeight(work, -500) - 808) < 0.01, "top above monitor clamps to work area");
-            Check(Math.Abs(Viewport.Fit(work, 600, 400) - 408) < 0.01, "window pushed up to stay inside");
-            Check(Math.Abs(Viewport.Fit(work, 100, 400) - 100) < 0.01, "fitting window not moved");
-            Check(Math.Abs(Viewport.Fit(work, 100, 2000) - 8) < 0.01, "too tall window starts at work top");
-
             Exception failure = null;
-            string dir = NewDir("viewport");
+            string dir = NewDir("popup");
             var thread = new Thread(() =>
             {
                 try
                 {
-                    foreach (var scale in new[] { 1.0, 1.5, 2.0 })
-                        foreach (var expanded in new[] { false, true })
-                        {
-                            var act = new CardActions { OpenUrl = u => { }, ToggleActivity = () => { }, ActivityExpanded = expanded, Menu = a => { }, Refresh = () => { } };
-                            var view = CardView.Build(UiSnaps(), Theme.Resolve("light"), DateTime.Now, DateTime.Now, false, act, false, 1.0);
-                            if (scale != 1) view.LayoutTransform = new ScaleTransform(scale, scale);
-                            view.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                            double full = view.DesiredSize.Height;
-                            var sv = Viewport.Create();
-                            sv.MaxHeight = Viewport.MaxHeight(work, 8);
-                            sv.Content = view;
-                            sv.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                            sv.Arrange(new Rect(sv.DesiredSize));
-                            sv.UpdateLayout();
-                            string tag = "scale " + scale + (expanded ? " expanded" : "");
-                            Check(sv.ActualHeight <= sv.MaxHeight + 0.5, tag + ": window height within work area");
-                            Check(Math.Abs(sv.ExtentHeight - full) < 1, tag + ": full content kept in scroll extent (nothing dropped)");
-                            if (full <= sv.MaxHeight)
-                                Check(sv.ScrollableHeight < 0.5 && Math.Abs(sv.ActualHeight - full) < 1, tag + ": fits -> no scrolling, same size");
-                            else
-                            {
-                                Check(sv.ScrollableHeight > 0 && sv.ComputedVerticalScrollBarVisibility == Visibility.Visible, tag + ": overflow -> vertical scroll");
-                                // клавиатура: фокус на последней кнопке прокручивает её в видимую часть
-                                var last = Logical(view).OfType<Button>().Last();
-                                last.BringIntoView();
-                                sv.UpdateLayout();
-                                Check(sv.VerticalOffset > 0, tag + ": BringIntoView scrolls to focused control");
-                                sv.ScrollToEnd();
-                                sv.UpdateLayout();
-                                Check(Math.Abs(sv.VerticalOffset - sv.ScrollableHeight) < 1, tag + ": end of content reachable");
-                            }
-                            Check(Math.Abs(sv.ActualWidth - (CardView.CardWidth * scale + 28 + (sv.ScrollableHeight > 0 ? SystemParameters.VerticalScrollBarWidth : 0))) < 2, tag + ": width stable (+ scrollbar only when needed)");
-                            var rtb = new RenderTargetBitmap((int)Math.Ceiling(sv.ActualWidth), (int)Math.Ceiling(sv.ActualHeight), 96, 96, PixelFormats.Pbgra32);
-                            rtb.Render(sv);
-                            var enc = new PngBitmapEncoder();
-                            enc.Frames.Add(BitmapFrame.Create(rtb));
-                            using (var fs = File.Create(Path.Combine(dir, string.Format("viewport-{0:0}{1}.png", scale * 100, expanded ? "-expanded" : "")))) enc.Save(fs);
-                        }
+                    foreach (var expandedState in new[] { false, true })
+                    {
+                        // прежнее state.activityExpanded=true не раскрывает карточку
+                        var act = new CardActions { OpenUrl = u => { }, ToggleActivity = () => { }, ActivityExpanded = expandedState, Menu = a => { }, Refresh = () => { } };
+                        var view = CardView.Build(UiSnaps(), Theme.Resolve("light"), DateTime.Now, DateTime.Now, false, act, false, 2.0);
+                        Check(!Logical(view).OfType<ScrollViewer>().Any(), "no ScrollViewer in main tree");
+                        var texts = Logical(view).OfType<TextBlock>().Select(x => x.Text ?? "").ToList();
+                        Check(!texts.Any(x => x == "Всего токенов" || x == "Самый долгий ход"), "main card has no inline activity summary (expanded state " + expandedState + ")");
+                        Check(texts.Any(x => x.StartsWith("Активность Codex · 7 дней · ")), "compact activity line present");
+                        var trigger = Logical(view).OfType<Button>().FirstOrDefault(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "") == "Показать подробную статистику Codex");
+                        Check(trigger != null && trigger.Focusable, "keyboard-focusable activity trigger");
+                    }
+                    var snaps = UiSnaps();
+                    var a1 = snaps.First(s => s.Id == "codex").Activity;
+                    var panel = CardView.ActivityPanel(a1, Theme.Resolve("dark"), DateTime.Now, null);
+                    var ptexts = Logical(panel).OfType<TextBlock>().Select(x => x.Text ?? "").ToList();
+                    Check(ptexts.Contains("Всего токенов") && ptexts.Contains(CreditStats.Number(123456789)) && ptexts.Contains("—"), "popup shows details; null stays dash");
+                    var stale = TokenActivity.FromDict(a1.ToDict()); stale.MeasuredAt = a1.MeasuredAt; stale.Stale = true;
+                    Check(Logical(CardView.ActivityPanel(stale, Theme.Resolve("light"), DateTime.Now, null)).OfType<TextBlock>().Any(x => (x.Text ?? "").Contains("не удался")), "stale shown in popup");
+                    // окно: без панели задач, Esc/×, обновление содержимого без привязки к карточке
+                    var popup = new ActivityPopup(null, Theme.Resolve("light"), 1.5);
+                    popup.Update(a1, Theme.Resolve("light"), DateTime.Now);
+                    var first = popup.Content;
+                    popup.Update(stale, Theme.Resolve("light"), DateTime.Now);
+                    Check(!popup.ShowInTaskbar && popup.WindowStyle == WindowStyle.None && !ReferenceEquals(first, popup.Content), "owned tool popup, content rebuilt on update");
+                    Check(Logical((DependencyObject)popup.Content).OfType<Button>().Any(b => (System.Windows.Automation.AutomationProperties.GetName(b) ?? "").StartsWith("Закрыть статистику")), "explicit close button");
+                    popup.Close();
+                    foreach (var theme in new[] { "light", "dark" })
+                    {
+                        var host = new Border { Background = Brushes.Gray, Child = CardView.ActivityPanel(a1, Theme.Resolve(theme), DateTime.Now, () => { }) };
+                        host.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        host.Arrange(new Rect(host.DesiredSize));
+                        host.UpdateLayout();
+                        var rtb = new RenderTargetBitmap((int)Math.Ceiling(host.ActualWidth * 2), (int)Math.Ceiling(host.ActualHeight * 2), 192, 192, PixelFormats.Pbgra32);
+                        rtb.Render(host);
+                        var enc = new PngBitmapEncoder();
+                        enc.Frames.Add(BitmapFrame.Create(rtb));
+                        using (var fs = File.Create(Path.Combine(dir, "activity-popup-" + theme + ".png"))) enc.Save(fs);
+                    }
                 }
                 catch (Exception ex) { failure = ex; }
             });
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
             thread.Join();
-            if (failure != null) throw new Exception("viewport: " + failure.Message, failure);
+            if (failure != null) throw new Exception("popup: " + failure.Message, failure);
         }
 
         static bool Alive(int pid)
@@ -1148,7 +1141,7 @@ namespace LimitsWidget
                 Section("CLI login device code scan", LoginScan);
                 Section("version metadata", Version);
                 Section("UI render matrix, keyboard, Subscriptions dialog", UiMatrix);
-                Section("viewport bounded by monitor work area at 100-200 %", ViewportBounds);
+                Section("compact widget: no scroll, activity in owned popup", ActivityPopupChecks);
                 File.WriteAllLines(Path.Combine(output, "limits-tests.txt"), report);
                 Console.WriteLine("PASS: " + sections + " sections, " + assertions + " assertions; offline fakes only");
                 return 0;

@@ -41,7 +41,14 @@ namespace LimitsWidget
             // действия-заглушки: картинка показывает те же кнопки, что и окно (↗ профиля, тема, скрепка, свернуть, «Подробнее»)
             var act = new CardActions { OpenUrl = u => { }, Run = id => { }, TogglePin = () => { }, Minimize = () => { }, CycleTheme = () => { },
                 ThemeMode = "auto", ToggleActivity = () => { }, ActivityExpanded = o.ActivityExpanded };
-            var card = CardView.Build(snaps, theme, DateTime.Now, DateTime.Now, false, act, o.Compact, 1.0);
+            // главная карточка — всегда компактная; --activity-expanded экспортирует отдельно окно подробной статистики Codex
+            FrameworkElement card = CardView.Build(snaps, theme, DateTime.Now, DateTime.Now, false, act, o.Compact, 1.0);
+            if (o.ActivityExpanded)
+            {
+                var codex = snaps.FirstOrDefault(s => s.Id == "codex" && s.Activity != null);
+                if (codex == null) throw new InvalidOperationException("no_codex_activity");
+                card = CardView.ActivityPanel(codex.Activity, theme, DateTime.Now, null);
+            }
             if (Math.Abs(o.UiScale - 1) > 0.01) card.LayoutTransform = new ScaleTransform(o.UiScale, o.UiScale);
 
             // подложка «под обои», чтобы видеть полупрозрачность карточки
