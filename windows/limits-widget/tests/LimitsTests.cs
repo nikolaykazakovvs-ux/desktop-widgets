@@ -673,6 +673,35 @@ namespace LimitsWidget
             Program.BaseDir = output;
         }
 
+        // Чистая геометрия: окна не создаются и не показываются, конфигурация мониторов синтетическая.
+        static void ActivityPopupPlacement()
+        {
+            var primary = new Rect(0, 0, 1920, 1040);
+            var p = ActivityPopup.Placement(new Rect(0, 100, 300, 500), new Size(352, 600), primary);
+            Check(p == new Point(294, 100), "stepped monitors: popup stays on owner monitor instead of invisible lower-left gap");
+            var upperLeft = new Rect(-1920, -1080, 1920, 1040);
+            p = ActivityPopup.Placement(new Rect(-300, -100, 300, 60), new Size(352, 600), upperLeft);
+            Check(p == new Point(-646, -640), "negative secondary monitor: left placement and bottom taskbar clamp");
+            p = ActivityPopup.Placement(new Rect(1800, -100, 120, 300), new Size(352, 600), primary);
+            Check(p == new Point(1454, 0), "right and top edges remain visible");
+            p = ActivityPopup.Placement(new Rect(100, 900, 1800, 100), new Size(352, 600), primary);
+            Check(p == new Point(1568, 440), "neither side fits: overlap owner and clamp both right and bottom");
+            var pixels = new Rect(-2880, -1620, 2880, 1560);
+            foreach (double dpiScale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                var wa = ActivityPopup.WorkAreaToDip(pixels, new Matrix(1 / dpiScale, 0, 0, 1 / dpiScale, 0, 0));
+                Check(Math.Abs(wa.Left - pixels.Left / dpiScale) < 0.001 && Math.Abs(wa.Bottom - pixels.Bottom / dpiScale) < 0.001, "pixel work area converted to owner DIP at " + dpiScale);
+                foreach (double x in new[] { wa.Left, wa.Right - 100 })
+                foreach (double y in new[] { wa.Top - 20, wa.Bottom - 20 })
+                {
+                    p = ActivityPopup.Placement(new Rect(x, y, 100, 100), new Size(352, 600), wa);
+                    Check(wa.Contains(new Rect(p, new Size(352, 600))), "all popup edges on negative owner monitor at " + dpiScale);
+                }
+            }
+            p = ActivityPopup.Placement(new Rect(5, 5, 30, 30), new Size(352, 600), new Rect(0, 0, 200, 300));
+            Check(p == new Point(0, 0), "oversized popup anchors to work area origin");
+        }
+
         // Оператор: виджет без прокрутки; статистика Codex — компактная кнопка в карточке и отдельное окно.
         static void ActivityPopupChecks()
         {
@@ -1142,6 +1171,7 @@ namespace LimitsWidget
                 Section("version metadata", Version);
                 Section("UI render matrix, keyboard, Subscriptions dialog", UiMatrix);
                 Section("compact widget: no scroll, activity in owned popup", ActivityPopupChecks);
+                Section("popup owner monitor placement and DPI", ActivityPopupPlacement);
                 File.WriteAllLines(Path.Combine(output, "limits-tests.txt"), report);
                 Console.WriteLine("PASS: " + sections + " sections, " + assertions + " assertions; offline fakes only");
                 return 0;

@@ -40,20 +40,38 @@ namespace LimitsWidget
             Content = panel;
         }
 
-        // Рядом с главным окном: слева от него, а если места нет — справа; по вертикали — в пределах экрана.
+        // Screen возвращает пиксели; Left/Top и размеры WPF заданы в DIP владельца.
+        internal static Rect WorkAreaToDip(Rect pixels, Matrix fromDevice)
+        {
+            return new Rect(fromDevice.Transform(pixels.TopLeft), fromDevice.Transform(pixels.BottomRight));
+        }
+
+        internal static Point Placement(Rect owner, Size popup, Rect workArea)
+        {
+            double left = owner.Left - popup.Width + 6;
+            if (left < workArea.Left) left = owner.Right - 6;
+            // Если сбоку места нет, допускаем перекрытие владельца, но не уход в промежуток между мониторами.
+            left = Math.Max(workArea.Left, Math.Min(left, workArea.Right - popup.Width));
+            double top = Math.Max(workArea.Top, Math.Min(owner.Top, workArea.Bottom - popup.Height));
+            return new Point(left, top);
+        }
+
+        // Рядом с главным окном, строго в рабочей области его реального монитора.
         public void ShowNear(Window owner)
         {
+            var handle = new WindowInteropHelper(owner).EnsureHandle();
+            var screen = System.Windows.Forms.Screen.FromHandle(handle);
+            var source = HwndSource.FromHwnd(handle);
+            var pixels = screen.WorkingArea;
+            var workArea = WorkAreaToDip(new Rect(pixels.X, pixels.Y, pixels.Width, pixels.Height), source.CompositionTarget.TransformFromDevice);
             WindowStartupLocation = WindowStartupLocation.Manual;
-            Left = -32000;
+            Left = owner.Left;
             Top = owner.Top;
             Show();
             UpdateLayout();
-            var wa = SystemParameters.VirtualScreenLeft;
-            double left = owner.Left - ActualWidth + 6;
-            if (left < SystemParameters.VirtualScreenLeft) left = owner.Left + owner.ActualWidth - 6;
-            Left = left;
-            double bottom = SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight;
-            if (Top + ActualHeight > bottom) Top = Math.Max(SystemParameters.VirtualScreenTop, bottom - ActualHeight);
+            var position = Placement(new Rect(owner.Left, owner.Top, owner.ActualWidth, owner.ActualHeight), new Size(ActualWidth, ActualHeight), workArea);
+            Left = position.X;
+            Top = position.Y;
             Activate();
             if (Content is FrameworkElement) ((FrameworkElement)Content).MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
         }
