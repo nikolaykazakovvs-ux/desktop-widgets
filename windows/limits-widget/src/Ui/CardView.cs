@@ -360,7 +360,7 @@ namespace LimitsWidget
             if (known)
             {
                 chip.Background = t.ChipBg;
-                text.Text = s.Plan + (s.PlanSource == "provider" ? Fmt.Nbsp + "·" + Fmt.Nbsp + "авто" : "");
+                text.Text = s.Plan + (s.PlanSource == "provider" ? Fmt.Nbsp + "·" + Fmt.Nbsp + (s.AutoPlanIsLevel ? "уровень" : "авто") : "");
                 text.Foreground = t.ChipText;
             }
             else
@@ -372,7 +372,7 @@ namespace LimitsWidget
             }
             chip.Child = text;
             chip.ToolTip = PlanResolver.Describe(s);
-            System.Windows.Automation.AutomationProperties.SetName(chip, "Тариф: " + (known ? s.Plan : "неизвестен"));
+            System.Windows.Automation.AutomationProperties.SetName(chip, (known && s.PlanSource == "provider" && s.AutoPlanIsLevel ? "Тариф: уровень аккаунта " : "Тариф: ") + (known ? s.Plan : "неизвестен"));
             return chip;
         }
 

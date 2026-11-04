@@ -266,6 +266,7 @@ namespace LimitsWidget
         public string PlanSource;     // "manual" | "provider" | null (неизвестно)
         public string AutoPlan;       // тариф из подтверждённого поля провайдера (для диалога «Подписки»)
         public string AutoPlanSource; // какое поле провайдера его подтвердило
+        public bool AutoPlanIsLevel;  // AutoPlan — уровень аккаунта (Kimi userLevelName), а не подтверждённый оплаченный тариф
         public string Url;            // страница лимитов
         public string ProfileUrl;     // страница профиля/подписки (аккаунт, оплата) — отдельно от лимитов
         public string Source;         // откуда данные (для подсказки)
@@ -294,6 +295,7 @@ namespace LimitsWidget
             d["planSource"] = PlanSource;
             d["autoPlan"] = AutoPlan;
             d["autoPlanSource"] = AutoPlanSource;
+            d["autoPlanIsLevel"] = AutoPlanIsLevel;
             d["url"] = Url;
             d["profileUrl"] = ProfileUrl;
             d["source"] = Source;
@@ -322,6 +324,7 @@ namespace LimitsWidget
             s.PlanSource = Json.Str(Json.Get(d, "planSource"));
             s.AutoPlan = Json.Str(Json.Get(d, "autoPlan"));
             s.AutoPlanSource = Json.Str(Json.Get(d, "autoPlanSource"));
+            s.AutoPlanIsLevel = Json.Bool(Json.Get(d, "autoPlanIsLevel")) == true;
             s.Url = Json.Str(Json.Get(d, "url"));
             s.ProfileUrl = Json.Str(Json.Get(d, "profileUrl"));
             s.Source = Json.Str(Json.Get(d, "source"));
@@ -401,7 +404,9 @@ namespace LimitsWidget
         public static string Describe(ServiceSnapshot s)
         {
             if (s.PlanSource == "manual") return "Тариф указан вручную (меню → «Подписки…»)"
-                + (string.IsNullOrEmpty(s.AutoPlan) ? "" : ". Провайдер сообщает: " + s.AutoPlan);
+                + (string.IsNullOrEmpty(s.AutoPlan) ? "" : (s.AutoPlanIsLevel ? ". Уровень аккаунта у провайдера: " : ". Провайдер сообщает: ") + s.AutoPlan);
+            if (s.PlanSource == "provider" && s.AutoPlanIsLevel)
+                return "Уровень аккаунта: " + s.Plan + " (" + (s.AutoPlanSource ?? "профиль провайдера") + "). Это уровень профиля, а не подтверждение оплаченного тарифа; тариф можно указать вручную в меню → «Подписки…»";
             if (s.PlanSource == "provider") return "Тариф определён автоматически: " + (s.AutoPlanSource ?? "поле провайдера");
             return "Тариф неизвестен: провайдер не сообщает его подтверждённым полем. Укажите вручную в меню → «Подписки…»";
         }
@@ -459,7 +464,9 @@ namespace LimitsWidget
             switch (id)
             {
                 case "claude": s.Title = "Claude Code"; s.Url = "https://claude.ai/settings/usage"; s.ProfileUrl = "https://claude.ai/settings/billing"; break;
-                case "kimi": s.Title = "Kimi"; s.BaseUrl = "https://api.kimi.com/coding/v1"; s.TimeoutSeconds = 10; s.StartServer = true; break;
+                // страница подписки из официальной справки Kimi (help/membership/membership-account-query → «membership subscription page»);
+                // другой регион без подтверждённого адреса — через services.kimi.profileUrl, домены не подставляются
+                case "kimi": s.Title = "Kimi"; s.BaseUrl = "https://api.kimi.com/coding/v1"; s.TimeoutSeconds = 10; s.StartServer = true; s.ProfileUrl = "https://www.kimi.com/membership/subscription"; break;
                 case "antigravity": s.Title = "Antigravity"; s.TimeoutSeconds = 30; s.MaxProcesses = 1; s.ProfileUrl = "https://myaccount.google.com/payments-and-subscriptions"; break;
                 case "codex": s.Title = "GPT / Codex"; s.Url = "https://chatgpt.com/codex/settings/usage"; s.ProfileUrl = "https://chatgpt.com/#settings/Account"; s.TimeoutSeconds = 30; break;
             }

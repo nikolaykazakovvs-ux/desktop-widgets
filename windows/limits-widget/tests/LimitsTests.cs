@@ -331,6 +331,136 @@ namespace LimitsWidget
             }
         }
 
+        // Loopback-сервер с ответом по пути (квота и userinfo отдельно).
+        sealed class PathServer : IDisposable
+        {
+            readonly TcpListener l = new TcpListener(IPAddress.Loopback, 0);
+            public int Port;
+            public readonly List<string> Paths = new List<string>();
+            public PathServer(Func<string, KeyValuePair<int, string>> route)
+            {
+                l.Start();
+                Port = ((IPEndPoint)l.LocalEndpoint).Port;
+                var t = new Thread(() =>
+                {
+                    while (true)
+                    {
+                        TcpClient c;
+                        try { c = l.AcceptTcpClient(); }
+                        catch { return; }
+                        using (c)
+                        {
+                            try
+                            {
+                                var s = c.GetStream();
+                                var r = new StreamReader(s, Encoding.ASCII);
+                                string first = r.ReadLine() ?? "", line;
+                                while (!string.IsNullOrEmpty(line = r.ReadLine())) { }
+                                string path = first.Split(' ').Length > 1 ? first.Split(' ')[1] : "/";
+                                lock (Paths) Paths.Add(path);
+                                var resp = route(path);
+                                var b = Encoding.UTF8.GetBytes(resp.Value);
+                                var h = Encoding.ASCII.GetBytes("HTTP/1.1 " + resp.Key + " X\r\nContent-Length: " + b.Length + "\r\nConnection: close\r\n\r\n");
+                                s.Write(h, 0, h.Length);
+                                s.Write(b, 0, b.Length);
+                            }
+                            catch { }
+                        }
+                    }
+                }) { IsBackground = true };
+                t.Start();
+            }
+            public void Dispose() { l.Stop(); }
+        }
+
+        const string Quota40 = "{\"code\":0,\"data\":{\"kind\":\"ok\",\"quota\":{\"usages\":{\"limit5h\":{\"usedRatio\":0.4}}}}}";
+        const string PiiCanaries = "\"userId\":\"UID-CANARY-7731\",\"email\":\"canary.person@example.test\",\"phone\":\"+10000099999\",\"nickname\":\"NICK-CANARY\"";
+
+        static ServiceSnapshot KimiWith(string home, string userinfo, int userinfoStatus, ServiceConfig tweak, State st, List<ServiceSnapshot> cores)
+        {
+            using (var srv = new PathServer(path => path.StartsWith("/api/v1/oauth/userinfo")
+                ? new KeyValuePair<int, string>(userinfoStatus, userinfo)
+                : new KeyValuePair<int, string>(200, Quota40)))
+            {
+                string dir = Path.Combine(home, "server", "instances");
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                WriteInstance(home, "level", srv.Port, Process.GetCurrentProcess().Id, NowMs());
+                var cfg = new Config();
+                cfg.Svc("kimi").StartServer = false;
+                if (tweak != null) { cfg.Svc("kimi").Plan = tweak.Plan; cfg.Svc("kimi").ProfileUrl = tweak.ProfileUrl ?? cfg.Svc("kimi").ProfileUrl; }
+                var ctx = Ctx(cfg, "kimi", null).Also(c => { c.FixtureOnly = false; c.State = st ?? new State(); });
+                if (cores != null) ctx.Core = c => { var k = c.Clone(); k.DataTime = c.DataTime; cores.Add(k); };   // точное время до сериализации
+                var s = new KimiProvider(new KimiServerManager()).Collect(ctx);
+                Check(srv.Paths.Count(x => x.StartsWith("/api/v1/oauth/usage")) == 1, "one quota request");
+                Check(srv.Paths.Count(x => x.StartsWith("/api/v1/oauth/userinfo")) <= 1, "at most one userinfo request");
+                return s;
+            }
+        }
+
+        static void KimiLevel()
+        {
+            string home = NewDir("kimi-home-level");
+            Environment.SetEnvironmentVariable("KIMI_CODE_HOME", home);
+            File.WriteAllText(Path.Combine(home, "server.token"), "synthetic-level-token");
+            Check(KimiProvider.ParseLevel(Json.Parse("{\"data\":{\"kind\":\"ok\",\"userInfo\":{\"userLevelName\":\"  Allegretto \"}}}")) == "Allegretto", "level parsed and trimmed");
+            Check(KimiProvider.ParseLevel(Json.Parse("{\"data\":{\"kind\":\"error\",\"message\":\"x\"}}")) == null, "kind error -> no level");
+            Check(KimiProvider.ParseLevel(Json.Parse("{\"data\":{\"kind\":\"ok\",\"userInfo\":{\"userLevelName\":\"\"}}}")) == null, "empty level -> none");
+            Check(KimiProvider.ParseLevel(Json.Parse("{\"data\":{\"kind\":\"ok\",\"userInfo\":{\"userLevelName\":\"me@example.test\"}}}")) == null, "contact-like level rejected");
+            Check(KimiProvider.ParseLevel(Json.Parse("{\"data\":{\"kind\":\"ok\",\"userInfo\":{\"userLevelName\":7}}}")) == null, "non-string level rejected");
+
+            // 1) валидный userinfo: уровень, квоты опубликованы раньше и не изменились, PII нигде не осели
+            Program.BaseDir = NewDir("kimi-level-log");
+            var st = new State { FilePath = Path.Combine(Program.BaseDir, "state.json") };
+            var cores = new List<ServiceSnapshot>();
+            var s = KimiWith(home, "{\"code\":0,\"data\":{\"kind\":\"ok\",\"userInfo\":{\"userLevelName\":\"Allegretto\"," + PiiCanaries + "}}}", 200, null, st, cores);
+            Check(s.Status == SvcStatus.Ok && s.Bars.Count == 1 && Math.Abs(s.Bars[0].Used.Value - 40) < 0.001, "quota ok with level");
+            Check(s.AutoPlan == "Allegretto" && s.AutoPlanIsLevel && s.Plan == "Allegretto" && s.PlanSource == "provider" && s.AutoPlanSource == KimiProvider.LevelSource, "level becomes automatic account level");
+            Check(PlanResolver.Describe(s).Contains("Уровень аккаунта") && PlanResolver.Describe(s).Contains("не подтверждение"), "tooltip calls it account level, not payment");
+            Check(cores.Count == 1 && cores[0].Status == SvcStatus.Ok && cores[0].AutoPlan == null, "quotas published before userinfo");
+            Check(cores[0].DataTime == s.DataTime && cores[0].StatusText == s.StatusText && s.Bars[0].Quota.MeasuredAt == s.DataTime, "userinfo does not change quota freshness/status");
+            st.PutCache(s);
+            st.Save();
+            Log.Write("probe line");   // журнал существует, в нём не должно быть данных профиля
+            var proj = Json.Serialize(TelemetryPublisher.ProjectProvider(s.Also(x => x.LastAttemptAt = DateTime.UtcNow)), false);
+            var dump = Json.Serialize(s.ToDict(), false);
+            foreach (var text in new[] { File.ReadAllText(st.FilePath), File.ReadAllText(Path.Combine(Program.BaseDir, "widget.log")), proj, dump })
+                foreach (var canary in new[] { "UID-CANARY", "canary.person", "10000099999", "NICK-CANARY", "userInfo", "userId", "email", "phone" })
+                    Check(!text.Contains(canary), "PII/raw userinfo never persisted/logged/exported: " + canary);
+            Check(!proj.Contains("Allegretto"), "level not in public telemetry");
+
+            // 2) ручной тариф главнее уровня
+            var manual = KimiWith(home, "{\"data\":{\"kind\":\"ok\",\"userInfo\":{\"userLevelName\":\"Allegretto\"}}}", 200, new ServiceConfig { Plan = "Moderato (вручную)" }, null, null);
+            Check(manual.Plan == "Moderato (вручную)" && manual.PlanSource == "manual" && manual.AutoPlan == "Allegretto", "manual plan wins over account level");
+            Check(PlanResolver.Describe(manual).Contains("Уровень аккаунта у провайдера"), "manual tooltip mentions account level");
+
+            // 3) сбой/нет данных: квоты Ok, уровня нет (или прошлый из последнего удачного снимка)
+            foreach (var bad in new[] { new KeyValuePair<int, string>(500, "{}"), new KeyValuePair<int, string>(200, "{\"data\":{\"kind\":\"error\",\"status\":503}}"),
+                new KeyValuePair<int, string>(200, "{\"data\":{\"kind\":\"ok\",\"userInfo\":{" + PiiCanaries + "}}}"), new KeyValuePair<int, string>(200, "not json") })
+            {
+                var f = KimiWith(home, bad.Value, bad.Key, null, null, null);
+                Check(f.Status == SvcStatus.Ok && f.Bars.Count == 1 && f.DataTime.HasValue, "userinfo failure never breaks quotas: " + bad.Key);
+                Check(f.AutoPlan == null && f.Plan == null && f.PlanSource == null, "no level -> unknown plan: " + bad.Value);
+                Check(!Json.Serialize(f.ToDict(), false).Contains("CANARY"), "no PII from failed userinfo");
+            }
+            var prevState = new State();
+            prevState.PutCache(s);
+            var kept = KimiWith(home, "{}", 500, null, prevState, null);
+            Check(kept.Status == SvcStatus.Ok && kept.AutoPlan == "Allegretto" && kept.AutoPlanIsLevel, "previous level kept when userinfo fails");
+            var back = ServiceSnapshot.FromDict(Json.Parse(Json.Serialize(s.ToDict(), false)));
+            Check(back.AutoPlanIsLevel && back.AutoPlan == "Allegretto", "level flag roundtrip");
+            string logText = File.ReadAllText(Path.Combine(Program.BaseDir, "widget.log"));
+            Check(logText.Contains("kimi userinfo: HTTP 500") && !logText.Contains("not json") && !logText.Contains("CANARY"), "failures logged by status only, never raw body");
+
+            // 4) ссылка подписки: подтверждённая по умолчанию, настроенная (другой регион) главнее
+            var cfg = new Config();
+            Check(cfg.Svc("kimi").ProfileUrl == "https://www.kimi.com/membership/subscription", "verified default Kimi subscription page");
+            var region = KimiWith(home, "{}", 500, new ServiceConfig { ProfileUrl = "https://www.kimi.ai/custom/subscription" }, null, null);
+            Check(region.ProfileUrl == "https://www.kimi.ai/custom/subscription", "configured other-region link retained, no domain mapping");
+            var def = KimiWith(home, "{}", 500, null, null, null);
+            Check(def.ProfileUrl == "https://www.kimi.com/membership/subscription" && def.Url == null, "default Kimi header link = subscription page, separate from quota url");
+            Program.BaseDir = output;
+        }
+
         static bool Alive(int pid)
         {
             try { using (var p = Process.GetProcessById(pid)) return !p.HasExited; }
@@ -532,6 +662,7 @@ namespace LimitsWidget
                     Check(!l.Contains("pricing") && !l.Contains("/plans") && !l.Contains("upgrade") && !l.Contains("buy"), "not a sales page: " + u);
                 }
                 Check(svc.ProfileUrl == null || svc.ProfileUrl != svc.Url, "profile destination separate from quota url: " + id);
+                Check(svc.ProfileUrl != null, "every provider has a default profile/subscription link: " + id);
             }
         }
 
@@ -591,7 +722,8 @@ namespace LimitsWidget
             claude.Bars.Add(new LimitBar { Chip = "5 ч", Label = "Сессия · окно 5 часов", Used = 35, ResetsAt = now.AddHours(2) });
             claude.Bars.Add(new LimitBar { Chip = "7 д", Label = "Неделя · Fable", Used = null, Note = "нет данных о расходе" });
             list.Add(claude);
-            var kimi = new ServiceSnapshot { Id = "kimi", Title = "Kimi", Status = SvcStatus.Error, StatusText = "нужен вход", Message = "Kimi Code просит войти", ActionId = KimiProvider.LoginAction, ActionLabel = "Войти в Kimi Code", Attention = true };
+            var kimi = new ServiceSnapshot { Id = "kimi", Title = "Kimi", Status = SvcStatus.Error, StatusText = "нужен вход", Message = "Kimi Code просит войти", ActionId = KimiProvider.LoginAction, ActionLabel = "Войти в Kimi Code", Attention = true,
+                Plan = "Allegretto", PlanSource = "provider", AutoPlan = "Allegretto", AutoPlanIsLevel = true, AutoPlanSource = KimiProvider.LevelSource, ProfileUrl = "https://www.kimi.com/membership/subscription" };
             kimi.Bars.Add(ProviderUtil.Placeholder("5 ч", "Окно 5 часов · только Kimi Code"));
             list.Add(kimi);
             var agy = new ServiceSnapshot { Id = "antigravity", Title = "Antigravity", Status = SvcStatus.Stale, StatusText = "данные 09:10", ProfileUrl = "https://myaccount.google.com/payments-and-subscriptions" };
@@ -711,6 +843,7 @@ namespace LimitsWidget
                 Section("Kimi ratio validation", KimiRatios);
                 Section("Kimi empty/revoked token", KimiEmptyToken);
                 Section("Kimi candidate fallback", KimiCandidates);
+                Section("Kimi account level (userinfo) and subscription link", KimiLevel);
                 Section("Kimi owned hidden server lifecycle", KimiManagedServer);
                 Section("Codex activity in same app-server", CodexActivity);
                 Section("Antigravity credits cache", AgyCreditsCache);

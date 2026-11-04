@@ -80,6 +80,11 @@ namespace LimitsWidget
                     return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Ответ сервера Kimi Code: " + ferr, Placeholders());
                 Fill(snap, fq);
                 ProviderUtil.MarkFresh(snap, ctx, true);
+                ApplyLevel(snap, ctx, PreviousLevel(ctx));
+                ctx.PublishCore(snap);
+                // необязательная фикстура уровня аккаунта; живой запрос в режиме фикстур не делается
+                string ufx = ProviderUtil.Fixture(ctx, "kimi-server-userinfo.json");
+                ApplyLevel(snap, ctx, ufx != null ? ParseLevel(Json.TryParse(ufx)) : null);
                 return snap;
             }
             fx = ProviderUtil.Fixture(ctx, "kimi-usages.json");
@@ -103,7 +108,7 @@ namespace LimitsWidget
             if (probe.Login)
                 return LoginNeeded(snap);
             if (probe.Quota != null)
-                return Served(snap, ctx, probe);
+                return Served(snap, ctx, probe, home);
 
             // 2) своего сервера нет — запустить скрытый `kimi web --no-open`, если это разрешено
             string startNote = null;
@@ -122,7 +127,7 @@ namespace LimitsWidget
                         if (wait < deadline) wait = deadline;
                         probe = WaitOwnServer(home, ctx.Now, wait);
                         if (probe.Login) return LoginNeeded(snap);
-                        if (probe.Quota != null) return Served(snap, ctx, probe);
+                        if (probe.Quota != null) return Served(snap, ctx, probe, home);
                         startNote = probe.Note ?? "Скрытый сервер Kimi Code запускается — данные появятся при следующем обновлении.";
                     }
                     else if (launch == KimiServerManager.Launch.Backoff)
@@ -182,7 +187,7 @@ namespace LimitsWidget
             return snap;
         }
 
-        ServiceSnapshot Served(ServiceSnapshot snap, ProviderContext ctx, Probe probe)
+        ServiceSnapshot Served(ServiceSnapshot snap, ProviderContext ctx, Probe probe, string home)
         {
             snap.Source = probe.Owned ? OwnServerSource : ServerSource;
             if (probe.Owned) server.MarkHealthy();
@@ -190,7 +195,82 @@ namespace LimitsWidget
             // Token refresh/liveness timestamps are never used as quota observations.
             Fill(snap, probe.Quota);
             ProviderUtil.MarkFresh(snap, ctx, false);
+            // квоты готовы — в UI и телеметрию сразу (с прошлым уровнем аккаунта, если он был);
+            // свежий уровень догружается отдельно и квоты, их время и статус не меняет
+            ApplyLevel(snap, ctx, PreviousLevel(ctx));
+            ctx.PublishCore(snap);
+            ApplyLevel(snap, ctx, probe.From != null ? ReadLevel(probe.From, home) : null);
             return snap;
+        }
+
+        // ---------- уровень аккаунта (GET /api/v1/oauth/userinfo) ----------
+        // userInfo.userLevelName — уровень профиля Kimi, а не подтверждение оплаченного тарифа. Необязательная догрузка:
+        // на квоты, их время и статус не влияет. Из ответа берётся только эта строка; userId, email, телефон и сам ответ
+        // нигде не сохраняются и не пишутся в журнал.
+        const int LevelBudgetMs = 3000;
+        internal const string LevelSource = "Kimi Code: /oauth/userinfo → userLevelName (уровень аккаунта, не подтверждение оплаты)";
+
+        static string ReadLevel(Instance inst, string home)
+        {
+            try
+            {
+                string token = ServerToken(home);
+                if (token == null) return null;
+                int status;
+                string body = Get(inst.BaseUrl + "/api/v1/oauth/userinfo", token, LevelBudgetMs, false, out status);
+                token = null;
+                if (body == null || status != 200)
+                {
+                    Log.Write("kimi userinfo: HTTP " + status);
+                    return null;
+                }
+                string level = ParseLevel(Json.TryParse(body));
+                body = null;
+                if (level == null) Log.Write("kimi userinfo: уровня аккаунта нет в ответе");
+                return level;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("kimi userinfo: " + ex.GetType().Name);
+                return null;
+            }
+        }
+
+        // data = { kind: "ok", userInfo: { userLevelName } }; всё прочее — нет уровня. Строка, похожая на контакт, отбрасывается.
+        internal static string ParseLevel(object env)
+        {
+            var data = Json.Get(env, "data");
+            if (Json.Str(Json.Get(data, "kind")) != "ok") return null;
+            var raw = Json.Get(data, "userInfo.userLevelName") as string;
+            if (raw == null) return null;
+            var sb = new StringBuilder();
+            foreach (char c in raw.Trim())
+            {
+                if (char.IsControl(c)) continue;
+                if (char.IsWhiteSpace(c)) { if (sb.Length > 0 && sb[sb.Length - 1] != ' ') sb.Append(' '); continue; }
+                sb.Append(c);
+            }
+            string level = sb.ToString().Trim();
+            if (level.Length == 0 || level.Length > 40) return null;
+            if (level.IndexOf('@') >= 0 || level.Count(char.IsDigit) >= 6) return null;
+            return level;
+        }
+
+        // Уровень из последнего удачного снимка (до публикации нового) — чтобы сбой userinfo не стирал известный уровень.
+        static string PreviousLevel(ProviderContext ctx)
+        {
+            var cached = ctx.State != null ? ctx.State.GetCache("kimi") : null;
+            return cached != null && cached.AutoPlanIsLevel && !string.IsNullOrEmpty(cached.AutoPlan) ? cached.AutoPlan : null;
+        }
+
+        // null — оставить как есть; ручной тариф всё равно главнее (PlanResolver).
+        static void ApplyLevel(ServiceSnapshot snap, ProviderContext ctx, string level)
+        {
+            if (level == null) return;
+            snap.AutoPlan = level;
+            snap.AutoPlanSource = LevelSource;
+            snap.AutoPlanIsLevel = true;
+            PlanResolver.Apply(snap, ctx.Svc);
         }
 
         static ServiceSnapshot LoginNeeded(ServiceSnapshot snap)
@@ -215,6 +295,7 @@ namespace LimitsWidget
         sealed class Probe
         {
             public KimiQuota Quota;
+            public Instance From;   // экземпляр, ответивший квотой (для уровня аккаунта)
             public bool Login, Invalid, Owned;
             public int Tried;
             public string Note;
@@ -342,6 +423,7 @@ namespace LimitsWidget
                 return false;
             }
             probe.Quota = q;
+            probe.From = inst;
             return true;
         }
 
