@@ -81,6 +81,8 @@ jobs:
             $coreOut = Join-Path $env:CI_ARTIFACTS_ROOT 'core-tests'
             & .\windows\limits-widget\tests\run.ps1 -OutDir $coreOut 2>&1 | Tee-Object -FilePath $logFile
             if ($LASTEXITCODE -ne 0) { throw "Core widget tests failed with exit code $LASTEXITCODE" }
+          } else {
+            throw "Required core widget test runner is missing: $coreTestRunner"
           }
 
       - name: Build AI Limits 1.1.0 release package (scoped Limits mode)
