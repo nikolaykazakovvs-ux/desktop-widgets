@@ -23,6 +23,8 @@ namespace ResourcesWidget
         DateTime nextWmi = DateTime.MinValue;
         double? wmiValue;
         string wmiSource;
+        DateTime? wmiMeasuredAtUtc;
+        public DateTime? MeasuredAtUtc;
 
         readonly LhmClient lhm;
 
@@ -37,17 +39,21 @@ namespace ResourcesWidget
         public double? Read()
         {
             string label;
-            double? t = LocalSensorSnapshot.Read(out label);
-            if (t.HasValue) { Source = "Локальный датчик · " + label; return t; }
+            MeasuredAtUtc = null;
+            DateTime? measured;
+            double? t = LocalSensorSnapshot.Read(out label, out measured);
+            if (t.HasValue) { MeasuredAtUtc = measured; Source = "Локальный датчик · " + label; return t; }
             t = FromHwinfo(out label);
             if (t.HasValue) { Source = "HWiNFO · " + label; return t; }
             t = FromAida(out label);
             if (t.HasValue) { Source = "AIDA64 · " + label; return t; }
             t = FromCoreTemp(out label);
             if (t.HasValue) { Source = "Core Temp · " + label; return t; }
-            t = ParseLhmTree(lhm != null ? lhm.Root : null, out label);
-            if (t.HasValue) { Source = "LibreHardwareMonitor · " + label; return t; }
+            measured = null;
+            t = ParseLhmTree(lhm != null ? lhm.Snapshot(out measured) : null, out label);
+            if (t.HasValue) { MeasuredAtUtc = measured; Source = "LibreHardwareMonitor · " + label; return t; }
             t = FromWmi();
+            MeasuredAtUtc = t.HasValue ? wmiMeasuredAtUtc : null;
             Source = t.HasValue ? wmiSource : null;
             return t;
         }
@@ -245,6 +251,7 @@ namespace ResourcesWidget
         {
             if (DateTime.UtcNow < nextWmi) return wmiValue;
             wmiValue = null;
+            wmiMeasuredAtUtc = null;
             wmiSource = null;
             foreach (string ns in WmiNamespaces)
             {
@@ -287,6 +294,7 @@ namespace ResourcesWidget
                 }
             }
             nextWmi = DateTime.UtcNow.AddSeconds(wmiValue.HasValue ? 2 : 30);
+            if (wmiValue.HasValue) wmiMeasuredAtUtc = DateTime.UtcNow;
             return wmiValue;
         }
 

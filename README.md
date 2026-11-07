@@ -85,7 +85,7 @@ Actual application interface; demo data. No personal account snapshot is shown.
 
 ## Data and privacy
 
-Settings, snapshots and journals stay beside the applications. Resources probes its configured ping host, reads the protected local sensor file and can query independently configured external sensors; limits queries explicitly enabled sources. Exports can include device/process/adapter names, paths and activity history. Inspect and redact before sharing. Personal configuration, account data and logs are excluded from the repository and public archives.
+Settings, snapshots and journals stay beside the applications. AI Limits 1.1.0 also publishes a private `%LOCALAPPDATA%\DesktopWidgets\telemetry\quotas-snapshot.json` (contract 1.0.0, current user only); the Resources source on `main` adds `hardware-snapshot.json` there, which the released Resources 1.1.1 does not include yet. Resources probes its configured ping host, reads the protected local sensor file and can query independently configured external sensors; limits queries explicitly enabled sources. Exports can include device/process/adapter names, paths and activity history. Inspect and redact before sharing. Personal configuration, account data and logs are excluded from the repository and public archives.
 
 The project page is static HTML, without analytics, account queries or external fonts. It uses actual WPF exports: real system readings for resources and controlled demo data for network history and limits.
 

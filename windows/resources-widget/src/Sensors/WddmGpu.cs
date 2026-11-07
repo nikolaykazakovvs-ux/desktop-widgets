@@ -160,14 +160,16 @@ namespace ResourcesWidget
             if (lastRun != null && ticks > lastTicks)
                 for (int n = 0; n < a.Nodes; n++)
                     load = Math.Max(load, 100.0 * (run[n] - lastRun[n]) / (ticks - lastTicks));
+            bool usageKnown = lastRun != null && ticks > lastTicks;
             lastRun = run;
             lastTicks = ticks;
 
             long dedicated = 0, shared = 0;
+            bool memoryKnown = true;
             for (int s = 0; s < a.Segments; s++)
             {
                 // D3DKMT_QUERYSTATISTICS_SEGMENT_INFORMATION: BytesResident @16, Aperture @40 (сегмент в общей памяти)
-                if (Stat(a, StatSegment, s) != 0) continue;
+                if (Stat(a, StatSegment, s) != 0) { memoryKnown = false; continue; }
                 long resident = Marshal.ReadInt64(stat, StatResult + 16);
                 if (Marshal.ReadInt32(stat, StatResult + 40) != 0) shared += resident;
                 else dedicated += resident;
@@ -185,6 +187,8 @@ namespace ResourcesWidget
                 SharedUsed = shared,
                 SharedTotal = a.Shared,
             };
+            if (usageKnown) g.UsageMeasuredAtUtc = DateTime.UtcNow;
+            if (memoryKnown && a.Segments > 0) g.MemoryMeasuredAtUtc = DateTime.UtcNow;
             if (a.Integrated)
             {
                 g.MemShared = true;
@@ -202,7 +206,7 @@ namespace ResourcesWidget
             if (Query(a.Handle, QaiAdapterPerf, 64, false) == 0)
             {
                 int temp = Marshal.ReadInt32(info, 56), rpm = Marshal.ReadInt32(info, 48);
-                if (temp > 0 && temp < 1500) g.Temp = temp / 10.0;
+                if (temp > 0 && temp < 1500) { g.Temp = temp / 10.0; g.TempMeasuredAtUtc = DateTime.UtcNow; }
                 if (rpm > 0 && rpm < 20000) g.FanRpm = rpm;
             }
             if (a.ClockNode >= 0)

@@ -35,7 +35,13 @@ namespace ResourcesWidget
                 }
             }
             if (g == null && a != null) g = wddm.Read();
-            if (g != null) LhmGpu.Supplement(g, lhm != null ? lhm.Root : null, a != null ? a.Vendor : 0x10DE);
+            if (g != null)
+            {
+                DateTime? measured = null;
+                bool hadTemp = g.Temp.HasValue;
+                LhmGpu.Supplement(g, lhm != null ? lhm.Snapshot(out measured) : null, a != null ? a.Vendor : 0x10DE);
+                if (!hadTemp && g.Temp.HasValue) g.TempMeasuredAtUtc = measured;
+            }
             return g;
         }
 
@@ -120,9 +126,11 @@ namespace ResourcesWidget
             }
             failures = 0;
             var g = new GpuInfo { Name = name, FullName = fullName, Vendor = "NVIDIA", Source = "NVML (драйвер NVIDIA)", Load = Math.Min(100, util.Gpu) };
+            g.UsageMeasuredAtUtc = DateTime.UtcNow;
             ReadMemory(g);
+            if (g.MemTotal > 0) g.MemoryMeasuredAtUtc = DateTime.UtcNow;
             uint v;
-            if (Native.NvmlDeviceGetTemperature(device, 0, out v) == Native.NVML_SUCCESS) g.Temp = v;
+            if (Native.NvmlDeviceGetTemperature(device, 0, out v) == Native.NVML_SUCCESS) { g.Temp = v; g.TempMeasuredAtUtc = DateTime.UtcNow; }
             if (Native.NvmlDeviceGetPowerUsage(device, out v) == Native.NVML_SUCCESS) g.Watts = v / 1000.0;
             if (Native.NvmlDeviceGetFanSpeed(device, out v) == Native.NVML_SUCCESS) g.Fan = v;
             try

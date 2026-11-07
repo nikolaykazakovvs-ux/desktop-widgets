@@ -123,6 +123,7 @@ if ($testResources) {
     $refs += @('WindowsBase.dll','PresentationCore.dll','PresentationFramework.dll') | ForEach-Object { Join-Path $fw ('WPF/' + $_) }
     $testExe = Join-Path $results 'NetworkJournalTests.exe'
     $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'windows/resources-widget/src') -Recurse -Filter '*.cs' | Sort-Object FullName | ForEach-Object { $_.FullName })
+    $sources += Join-Path $root 'telemetry/publisher-shared/TelemetrySnapshotWriter.cs'
     $sources += Join-Path $root 'windows/resources-widget/installer/shared/SensorSecurity.cs'
     $argsCsc = @('/nologo','/target:exe','/platform:x64','/codepage:65001','/utf8output','/main:NetworkJournalTests',"/out:$testExe") + ($refs | ForEach-Object { "/r:$_" }) + $sources + (Join-Path $PSScriptRoot 'tests/NetworkJournalTests.cs')
     & (Join-Path $fw 'csc.exe') @argsCsc

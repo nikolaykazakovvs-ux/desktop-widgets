@@ -111,7 +111,7 @@ namespace ResourcesWidget
                     idleSum += dIdle;
                     totalSum += dTotal;
                 }
-                if (totalSum > 0) info.Total = Clamp(100.0 * (totalSum - idleSum) / totalSum);
+                if (totalSum > 0) { info.Total = Clamp(100.0 * (totalSum - idleSum) / totalSum); info.UsageMeasuredAtUtc = DateTime.UtcNow; }
                 primed = true;
             }
             ReadFrequency(info);

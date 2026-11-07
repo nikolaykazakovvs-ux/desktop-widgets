@@ -20,6 +20,7 @@ namespace ResourcesWidget
             m.Processes = (int)p.ProcessCount;
             m.Threads = (int)p.ThreadCount;
             m.Handles = (int)p.HandleCount;
+            m.MeasuredAtUtc = DateTime.UtcNow;
             return m;
         }
     }

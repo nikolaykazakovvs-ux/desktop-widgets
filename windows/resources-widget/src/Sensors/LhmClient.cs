@@ -34,10 +34,16 @@ namespace ResourcesWidget
         // Последнее дерево показаний; null — LibreHardwareMonitor не отвечает. Прежнее дерево не отдаётся.
         public object Root
         {
-            get
+            get { DateTime? measured; return Snapshot(out measured); }
+        }
+
+        public object Snapshot(out DateTime? measured)
+        {
+            lock (gate)
             {
-                lock (gate)
-                    return root != null && (DateTime.UtcNow - at).TotalSeconds <= MaxAgeSeconds ? root : null;
+                bool valid = root != null && (DateTime.UtcNow - at).TotalSeconds >= 0 && (DateTime.UtcNow - at).TotalSeconds <= MaxAgeSeconds;
+                measured = valid ? (DateTime?)at : null;
+                return valid ? root : null;
             }
         }
 
