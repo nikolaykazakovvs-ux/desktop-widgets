@@ -15,6 +15,7 @@ $refs += @('WindowsBase.dll', 'PresentationCore.dll', 'PresentationFramework.dll
 
 $src = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -Filter '*.cs' | Sort-Object FullName | ForEach-Object { $_.FullName }
 $src += Join-Path $root 'installer\shared\SensorSecurity.cs'
+$src += Join-Path $root '..\..\telemetry\publisher-shared\TelemetrySnapshotWriter.cs'
 $ico = Join-Path $root 'assets\ResourcesWidget.ico'
 if (-not (Test-Path $ico)) { & (Join-Path $root 'tools\make-icon.ps1') -OutFile $ico }
 

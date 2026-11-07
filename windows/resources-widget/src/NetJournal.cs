@@ -54,6 +54,10 @@ namespace ResourcesWidget
         public string PingHost, Gateway;
         public double? PingMs, GatewayMs;   // последний ответ; null — не отвечает или пинг выключен
         public bool PingOn;
+        public DateTime? PingMeasuredAtUtc, GatewayMeasuredAtUtc;
+        public int ProbeIntervalMs;
+        public DateTime? ObservationAtUtc;
+        public DateTime WindowStartUtc, WindowEndUtc;
         public NetEvent Ongoing;            // идущий сейчас обрыв или высокий пинг
         public long LinkMaxSeen;            // самая высокая скорость соединения этого адаптера в журнале
     }
@@ -164,6 +168,10 @@ namespace ResourcesWidget
                 double since = (now - lastSave).TotalSeconds;
                 if (dirty && (since >= 300 || (peakChanged && since >= 60))) SaveDays(now);
                 health = Health(n, now);
+                // Calendar boundaries are converted independently, preserving 23/25-hour DST days.
+                health.WindowStartUtc = DateTime.SpecifyKind(today.Day, DateTimeKind.Local).ToUniversalTime();
+                health.WindowEndUtc = DateTime.SpecifyKind(today.Day.AddDays(1), DateTimeKind.Local).ToUniversalTime();
+                health.ObservationAtUtc = now.ToUniversalTime();
                 return today.Clone();
             }
         }
@@ -289,9 +297,20 @@ namespace ResourcesWidget
         void DrainPings(NetInfo n)
         {
             Pinger.Result r;
-            while (pinger.Results.TryDequeue(out r))
-            {
-                if (n == null || wasDown) continue;   // сеть отключена — это уже событие «отключение»
+            while (pinger.Results.TryDequeue(out r)) ApplyProbe(n, r);
+        }
+
+        internal void ApplyProbe(NetInfo n, Pinger.Result r)
+        {
+                if (n == null || wasDown) return;   // сеть отключена — это уже событие «отключение»
+                // A queued previous-day response can still be a fresh RTT at midnight, but it is not
+                // an observation in the new day's counters. Keep its original time and skip only its counts.
+                if (r.At.Date != today.Day)
+                {
+                    if (r.Gateway) { lastGw = r.Ms >= 0 ? (double?)r.Ms : null; if (r.Ms >= 0) lastGwAt = r.At; }
+                    else { lastPing = r.Ms >= 0 ? (double?)r.Ms : null; if (r.Ms >= 0) lastPingAt = r.At; }
+                    return;
+                }
                 if (r.Gateway)
                 {
                     mGwSent++;
@@ -299,7 +318,7 @@ namespace ResourcesWidget
                     if (r.Ms < 0) { mGwLost++; today.GwLost++; lastGw = null; }
                     else { mGwSum += r.Ms; lastGw = r.Ms; lastGwAt = r.At; }
                     if (outage != null) { if (r.Ms < 0) outageGwFails++; else outageGwOk++; }
-                    continue;
+                    return;
                 }
                 mSent++;
                 today.PingSent++;
@@ -315,7 +334,7 @@ namespace ResourcesWidget
                         outage = new NetEvent { Start = firstFail, Kind = "internet", Bad = true };
                         outageGwFails = outageGwOk = 0;
                     }
-                    continue;
+                    return;
                 }
                 lastPing = r.Ms;
                 lastPingAt = r.At;
@@ -340,7 +359,6 @@ namespace ResourcesWidget
                     slow = 0;
                     if (lag != null) CloseLag(r.At);
                 }
-            }
         }
 
         void CloseOutage(DateTime end)
@@ -379,12 +397,15 @@ namespace ResourcesWidget
         NetHealth Health(NetInfo n, DateTime now)
         {
             var h = new NetHealth { PingOn = pinger != null, PingHost = cfg.PingHost };
+            h.ProbeIntervalMs = cfg.PingIntervalSec * 1000;
             if (pinger != null)
             {
                 h.Gateway = pinger.Gateway;
                 double stale = Math.Max(5, cfg.PingIntervalSec * 3);
                 if (lastPing.HasValue && (now - lastPingAt).TotalSeconds < stale) h.PingMs = lastPing;
                 if (lastGw.HasValue && (now - lastGwAt).TotalSeconds < stale) h.GatewayMs = lastGw;
+                if (h.PingMs.HasValue) h.PingMeasuredAtUtc = lastPingAt.ToUniversalTime();
+                if (h.GatewayMs.HasValue) h.GatewayMeasuredAtUtc = lastGwAt.ToUniversalTime();
             }
             if (outage != null) h.Ongoing = new NetEvent { Start = outage.Start, Kind = "internet", Bad = true, Text = "Нет связи с интернетом " + Fmt.Duration(now - outage.Start) };
             else if (lag != null) h.Ongoing = new NetEvent { Start = lag.Start, Kind = "lag", Bad = true, Text = "Высокий пинг " + Fmt.Duration(now - lag.Start) };

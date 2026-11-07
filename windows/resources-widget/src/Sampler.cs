@@ -58,6 +58,7 @@ namespace ResourcesWidget
         readonly Ring cpuHist, gpuHist, downHist, upHist;
         readonly ManualResetEvent stop = new ManualResetEvent(false);
         readonly Stopwatch clock = new Stopwatch();
+        readonly TelemetryPublisher telemetry;
         Thread thread;
         double lastSeconds;
         int tick;
@@ -83,6 +84,11 @@ namespace ResourcesWidget
             gpuHist = new Ring(points);
             downHist = new Ring(points);
             upHist = new Ring(points);
+            if (!journalReadOnly)
+            {
+                try { telemetry = new TelemetryPublisher(cfg.IntervalMs, null, "live"); }
+                catch { Log.Write("telemetry: publisher_start_failed"); }
+            }
         }
 
         public void Start()
@@ -113,6 +119,7 @@ namespace ResourcesWidget
                 try
                 {
                     var s = Collect(true);
+                    if (telemetry != null) telemetry.Submit(s);
                     var handler = Updated;
                     if (handler != null) handler(s);
                 }
@@ -150,6 +157,7 @@ namespace ResourcesWidget
             {
                 s.Cpu.Temp = cpuTemp.Read();
                 s.Cpu.TempSource = cpuTemp.Source;
+                s.Cpu.TempMeasuredAtUtc = cpuTemp.MeasuredAtUtc;
             }
             catch (Exception ex)
             {
@@ -159,6 +167,7 @@ namespace ResourcesWidget
             s.Mem = mem.Read();
             s.Gpu = gpu.Read();
             s.Net = net.Read(seconds);
+            if (s.Net != null) s.Net.MeasuredAtUtc = DateTime.UtcNow;
             if (visible || ++tick % 4 == 0)
             {
                 lastDisks = disks.Read(visible);    // свободное место пересчитывается только для видимой карточки
@@ -173,6 +182,8 @@ namespace ResourcesWidget
             upHist.Add(s.Net != null ? s.Net.UpBps : 0);
             NetHealth health;
             var today = Journal.Update(s.Net, s.Time, seconds, out health);
+            s.NetworkDay = today;
+            s.NetworkHealth = health;
             if (s.Net != null)
             {
                 s.Net.PeakDown = downHist.Max();
@@ -184,12 +195,14 @@ namespace ResourcesWidget
             s.GpuHistory = gpuHist.ToArray();
             s.NetDownHistory = downHist.ToArray();
             s.NetUpHistory = upHist.ToArray();
+            s.CollectedAtUtc = DateTime.UtcNow;
             return s;
         }
 
         public void Dispose()
         {
             stop.Set();
+            if (telemetry != null) telemetry.Dispose();
             // если поток опроса не успел остановиться, буферы не освобождаем — процесс всё равно завершается
             if (thread != null && thread != Thread.CurrentThread && !thread.Join(1500)) return;
             Journal.Dispose();

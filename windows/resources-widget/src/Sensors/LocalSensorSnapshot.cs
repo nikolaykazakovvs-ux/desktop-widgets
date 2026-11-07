@@ -14,7 +14,13 @@ namespace ResourcesWidget
         public const int MaxBytes = 2048;
         public static double? Parse(string text, string sid, DateTime nowUtc, out string sensor)
         {
+            DateTime? measured;
+            return Parse(text, sid, nowUtc, out sensor, out measured);
+        }
+        public static double? Parse(string text, string sid, DateTime nowUtc, out string sensor, out DateTime? measured)
+        {
             sensor = null;
+            measured = null;
             if (string.IsNullOrEmpty(text) || text.Length > MaxBytes) return null;
             try
             {
@@ -33,6 +39,7 @@ namespace ResourcesWidget
                 if (double.IsNaN(temperature) || double.IsInfinity(temperature) || temperature <= 0 || temperature >= 150 || string.IsNullOrEmpty(label) || label.Length > 96) return null;
                 foreach (char c in label) if (char.IsControl(c)) return null;
                 sensor = label;
+                measured = at;
                 return temperature;
             }
             catch { return null; }
@@ -41,9 +48,19 @@ namespace ResourcesWidget
         {
             return Read(WindowsIdentity.GetCurrent().User.Value, out sensor);
         }
+        public static double? Read(out string sensor, out DateTime? measured)
+        {
+            return Read(WindowsIdentity.GetCurrent().User.Value, out sensor, out measured);
+        }
         public static double? Read(string sid, out string sensor)
         {
+            DateTime? measured;
+            return Read(sid, out sensor, out measured);
+        }
+        static double? Read(string sid, out string sensor, out DateTime? measured)
+        {
             sensor = null;
+            measured = null;
             try
             {
                 SensorSecurity.UserSid(sid);
@@ -53,7 +70,7 @@ namespace ResourcesWidget
                 using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 {
                     if (file.Length <= 0 || file.Length > MaxBytes) return null;
-                    using (var reader = new StreamReader(file)) return Parse(reader.ReadToEnd(), sid, DateTime.UtcNow, out sensor);
+                    using (var reader = new StreamReader(file)) return Parse(reader.ReadToEnd(), sid, DateTime.UtcNow, out sensor, out measured);
                 }
             }
             catch { return null; }

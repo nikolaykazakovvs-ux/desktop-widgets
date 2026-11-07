@@ -18,6 +18,7 @@ namespace ResourcesWidget
         public double? MaxMhz;      // наибольшая частота среди потоков
         public double? Temp;        // температура, °C; null — ни одна программа мониторинга не делится ею
         public string TempSource;   // откуда температура: "HWiNFO · CPU (Tctl/Tdie)"
+        public DateTime? UsageMeasuredAtUtc, TempMeasuredAtUtc;
     }
 
     sealed class MemInfo
@@ -25,6 +26,7 @@ namespace ResourcesWidget
         public long Total, Available, Cache;
         public long CommitTotal, CommitLimit;
         public int Processes, Threads, Handles;
+        public DateTime? MeasuredAtUtc;
 
         public long Used { get { return Total - Available; } }
         public double Percent { get { return Total > 0 ? 100.0 * Used / Total : 0; } }
@@ -42,6 +44,7 @@ namespace ResourcesWidget
         public bool MemShared;          // MemUsed/MemTotal — общая память, а не своя
         public long SharedUsed, SharedTotal;
         public double? Temp, Watts, Fan, FanRpm, ClockMhz;   // Fan — %, FanRpm — об/мин, ClockMhz — частота ядра
+        public DateTime? UsageMeasuredAtUtc, MemoryMeasuredAtUtc, TempMeasuredAtUtc;
 
         public double MemPercent { get { return MemTotal > 0 ? 100.0 * MemUsed / MemTotal : 0; } }
     }
@@ -60,6 +63,7 @@ namespace ResourcesWidget
 
     sealed class NetInfo
     {
+        public DateTime? MeasuredAtUtc;
         public string Name;             // имя активного адаптера
         public long LinkBps;
         public double DownBps, UpBps;   // байт в секунду
@@ -81,6 +85,9 @@ namespace ResourcesWidget
     sealed class Sample
     {
         public DateTime Time;
+        public DateTime CollectedAtUtc;
+        public NetHealth NetworkHealth;
+        public DayPeaks NetworkDay;
         public TimeSpan Uptime;
         public CpuInfo Cpu;
         public MemInfo Mem;
