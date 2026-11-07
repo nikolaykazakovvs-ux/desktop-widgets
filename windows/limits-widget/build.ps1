@@ -14,6 +14,9 @@ $refs += @('WindowsBase.dll', 'PresentationCore.dll', 'PresentationFramework.dll
     ForEach-Object { Join-Path $fw "WPF\$_" }
 
 $src = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -Filter '*.cs' | Sort-Object FullName | ForEach-Object { $_.FullName }
+$shared = Join-Path $root '..\..\telemetry\publisher-shared\TelemetrySnapshotWriter.cs'
+if (-not (Test-Path -LiteralPath $shared)) { throw 'Missing shared telemetry writer source' }
+$src += (Resolve-Path -LiteralPath $shared).Path
 $ico = Join-Path $root 'assets\LimitsWidget.ico'
 if (-not (Test-Path $ico)) { & (Join-Path $root 'tools\make-icon.ps1') -OutFile $ico }
 

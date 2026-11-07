@@ -31,6 +31,9 @@ namespace LimitsWidget
         public ServiceSnapshot Collect(ProviderContext ctx)
         {
             var snap = ProviderUtil.NewSnap(ctx, Id);
+            // get_usage and /usage can return a cached snapshot without exposing its age/source.
+            // Only the desktop-history fallback below proves an original sample timestamp.
+            snap.ObservationTimeUnknown = true;
             snap.Source = "claude -p \"/usage\" — лимиты тарифа Claude (общие для Claude Code и claude.ai)";
 
             // Основной путь — служебный запрос get_usage (лимиты, кредиты, расход по продуктам); фикстура — объект response.response.
@@ -40,6 +43,7 @@ namespace LimitsWidget
                 if (FillFromUsage(snap, Json.TryParse(guFix), ctx))
                 {
                     ProviderUtil.MarkFresh(snap, ctx, true);
+                    EnrichPlan(snap, ctx, null);
                     return snap;
                 }
                 Log.Write("claude get_usage (фикстура): нет rate_limits");
@@ -50,6 +54,7 @@ namespace LimitsWidget
             string cliExe = null;
             if (!fixture)
             {
+                if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                 string exe = cliExe = Cli.Resolve(ctx.Svc.Command, "claude");
                 if (exe == null)
                     return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "claude не найден в PATH — укажите services.claude.command в config.json", Placeholders());
@@ -60,6 +65,7 @@ namespace LimitsWidget
                     if (data != null && FillFromUsage(snap, data, ctx))
                     {
                         ProviderUtil.MarkFresh(snap, ctx, false);
+                        EnrichPlan(snap, ctx, exe);
                         return snap;
                     }
                     Log.Write("claude get_usage: " + (guError ?? "rate_limits недоступны"));
@@ -93,6 +99,10 @@ namespace LimitsWidget
                     bar.Chip = "7" + Fmt.Nbsp + "д";
                     bar.Label = scope.Equals("all models", StringComparison.OrdinalIgnoreCase) ? "Неделя · все модели" : "Неделя · " + scope;
                 }
+                string telemetryScope = m.Groups["scope"].Value.Trim().ToLowerInvariant();
+                string telemetryPool = m.Groups["what"].Value.Equals("session", StringComparison.OrdinalIgnoreCase) || telemetryScope == "all models" || telemetryScope == "" ? "subscription.general" : telemetryScope == "opus" ? "subscription.opus" : telemetryScope == "sonnet" ? "subscription.sonnet" : null;
+                bool telemetryFive = m.Groups["what"].Value.Equals("session", StringComparison.OrdinalIgnoreCase);
+                bar.Quota = QuotaObservation.Create("claude", telemetryPool, telemetryFive ? "five_hour" : "seven_day", telemetryFive ? 18000 : 604800, bar.Used, bar.ResetsAt);
                 bar.Tip = m.Value.Trim();
                 snap.Bars.Add(bar);
             }
@@ -122,7 +132,41 @@ namespace LimitsWidget
                     "claude /usage не вернул лимитов" + (hint != null ? ": " + hint : ""), Placeholders());
             }
             ProviderUtil.MarkFresh(snap, ctx, fixture);
+            EnrichPlan(snap, ctx, cliExe);
             return snap;
+        }
+
+        // Тариф из штатного `claude auth status --json` (поле subscriptionType) — необязательная догрузка после публикации квот:
+        // их время и статус не меняет. Ответ CLI не сохраняется и не пишется в журнал; берётся только subscriptionType.
+        // Ручной тариф главнее — тогда CLI не запускается вовсе. Нет поля/старый CLI/ошибка — тариф остаётся ручным или неизвестным.
+        static void EnrichPlan(ServiceSnapshot snap, ProviderContext ctx, string exe)
+        {
+            var cached = ctx.State != null ? ctx.State.GetCache("claude") : null;
+            if (cached != null && cached.AutoPlanSource == ClaudeAuth.Source && !string.IsNullOrEmpty(cached.AutoPlan))
+                SetAutoPlan(snap, ctx, cached.AutoPlan);   // прошлый ответ — до публикации, чтобы бейдж не мигал
+            ctx.PublishCore(snap);
+            if (!string.IsNullOrWhiteSpace(ctx.Svc.Plan)) return;
+            ClaudeAuth.Result r = null;
+            if (!string.IsNullOrEmpty(ctx.FixturesDir))
+            {
+                string fx = ProviderUtil.Fixture(ctx, "claude-auth-status.json");
+                if (fx != null) r = ClaudeAuth.Parse(fx);
+            }
+            else if (exe != null)
+            {
+                int timeout = Math.Min(ClaudeAuth.TimeoutMs, Math.Max(1, ctx.Svc.TimeoutSeconds) * 1000);
+                r = ClaudeAuth.Shared.Get(exe, ctx.UtcNow(), () => ClaudeAuth.Query(exe, timeout));
+            }
+            if (r == null || !r.Answered) return;   // нет ответа — оставить прежнее
+            SetAutoPlan(snap, ctx, r.Plan);          // ответ без тарифа или выход из аккаунта — автоматического тарифа нет
+        }
+
+        static void SetAutoPlan(ServiceSnapshot snap, ProviderContext ctx, string plan)
+        {
+            snap.AutoPlan = plan;
+            snap.AutoPlanSource = plan != null ? ClaudeAuth.Source : null;
+            snap.AutoPlanIsLevel = false;
+            PlanResolver.Apply(snap, ctx.Svc);
         }
 
         public const string LoginAction = "claude-login";
@@ -237,16 +281,41 @@ namespace LimitsWidget
             var w = Json.Get(rl, key);
             if (Json.Obj(w) == null) return null;
             var bar = new LimitBar { Chip = chip, Label = label };
-            double? u = Util(rl, key);
-            bar.Used = u ?? 0;
+            double? u = ValidPercent(Util(rl, key));
+            // нет процента — расход неизвестен (не ноль)
+            bar.Used = u;
+            bar.Quota = QuotaObservation.Create("claude", PoolOf(key), key == "five_hour" ? "five_hour" : "seven_day", key == "five_hour" ? 18000 : 604800, u, Json.Time(Json.Get(w, "resets_at")));
             bar.ResetsAt = Json.Time(Json.Get(w, "resets_at"));
-            if (!u.HasValue) bar.Note = "окно не открыто";
+            if (!u.HasValue) bar.Note = bar.ResetsAt.HasValue ? "нет данных о расходе" : "окно не открыто";
             return bar;
+        }
+
+        // Подтверждённые ключи ответа get_usage → типизированный пул; прочие — только в UI.
+        static string PoolOf(string key)
+        {
+            switch (key)
+            {
+                case "five_hour": case "seven_day": return "subscription.general";
+                case "seven_day_opus": return "subscription.opus";
+                case "seven_day_sonnet": return "subscription.sonnet";
+                case "seven_day_cowork": return "subscription.cowork";
+                case "seven_day_oauth_apps": return "subscription.oauth_apps";
+                default: return null;
+            }
+        }
+
+        static double? ValidPercent(double? v)
+        {
+            if (!v.HasValue || double.IsNaN(v.Value) || double.IsInfinity(v.Value) || v.Value < 0) return null;
+            return v;
         }
 
         // Разбор ответа get_usage; false — нет rate_limits (тогда snap не тронут).
         static bool FillFromUsage(ServiceSnapshot snap, object data, ProviderContext ctx)
         {
+            // Current upstream get_usage erases cached-vs-network provenance (even status ok).
+            // Neither absence nor a textual value of cache_status proves a new observation.
+            snap.ObservationTimeUnknown = true;
             if (data == null || Json.Bool(Json.Get(data, "rate_limits_available")) == false) return false;
             object rl = Json.Get(data, "rate_limits");
             var rlObj = Json.Obj(rl);
@@ -268,6 +337,8 @@ namespace LimitsWidget
                 var b = WindowBar(rl, s[0], chip7, s[1], ctx.Now);
                 if (b != null) bars.Add(b);
             }
+            // Модельные недельные окна: имя модели — маркетинговая подпись, не идентификатор. Типизированный пул назначается
+            // только по подтверждённому ключу окна (как у seven_day_*), иначе окно остаётся в UI без квоты телеметрии.
             var ms = Json.Arr(Json.Get(rl, "model_scoped"));
             if (ms != null)
                 foreach (var m in ms)
@@ -276,12 +347,14 @@ namespace LimitsWidget
                     if (string.IsNullOrEmpty(name)) continue;
                     string label = "Неделя · " + name;
                     if (bars.Any(x => x.Label == label)) continue;
-                    bars.Add(new LimitBar
-                    {
-                        Chip = chip7, Label = label,
-                        Used = Json.Num(Json.Get(m, "utilization")) ?? 0,
-                        ResetsAt = Json.Time(Json.Get(m, "resets_at"))
-                    });
+                    double? u = ValidPercent(Json.Num(Json.Get(m, "utilization")));
+                    var bar = new LimitBar { Chip = chip7, Label = label, Used = u, ResetsAt = Json.Time(Json.Get(m, "resets_at")) };
+                    string key = Json.Str(Json.Get(m, "key")) ?? Json.Str(Json.Get(m, "id"));
+                    string pool = key != null && key.StartsWith("seven_day_", StringComparison.Ordinal) ? PoolOf(key) : null;
+                    bar.Quota = QuotaObservation.Create("claude", pool, "seven_day", 604800, u, bar.ResetsAt);
+                    bar.Tip = "Недельный лимит модели " + name + (pool == null ? ". Ответ не указывает подтверждённый идентификатор пула — окно показано только здесь." : ".");
+                    if (!u.HasValue) bar.Note = "нет данных о расходе";
+                    bars.Add(bar);
                 }
             if (bars.Count == 0) return false;
             snap.Bars.AddRange(bars);
@@ -468,7 +541,16 @@ namespace LimitsWidget
                     snap.Bars.Add(new LimitBar { Chip = "5" + Fmt.Nbsp + "ч", Label = "Сессия · окно 5 часов", Used = fh.Value });
                 if (sd.HasValue)
                     snap.Bars.Add(new LimitBar { Chip = "7" + Fmt.Nbsp + "д", Label = "Неделя · все модели", Used = sd.Value });
-                snap.DataTime = t;
+                // у записи приложения есть исходное время sample.t — оно и есть время наблюдения
+                snap.DataTime = Fmt.Utc(t.Value);
+                snap.ObservationTimeUnknown = false;
+                for (int i = 0; i < snap.Bars.Count; i++)
+                {
+                    var bar = snap.Bars[i];
+                    bool five = fh.HasValue && i == 0;
+                    bar.Quota = QuotaObservation.Create("claude", "subscription.general", five ? "five_hour" : "seven_day", five ? 18000 : 604800, bar.Used, null);
+                    if (bar.Quota != null) bar.Quota.MeasuredAt = t.Value.ToUniversalTime();
+                }
                 snap.Source = "приложение Claude (plan-usage-history.json) — запасной источник, пока у CLI нет входа";
                 return true;
             }
@@ -513,16 +595,18 @@ namespace LimitsWidget
             string s = TrailingZone.Replace(raw, "").Replace(" at ", " ").Trim();
             s = AmPm.Replace(s, m => m.Groups[1].Value + m.Groups[2].Value.ToUpperInvariant());
             DateTime dt;
+            now = Fmt.Local(now);
+            // строка /usage — местное время машины: Kind = Local, чтобы UTC-хранение и показ не сдвигали его
             if (DateTime.TryParseExact(s, DateFormats, En, DateTimeStyles.AllowWhiteSpaces, out dt))
             {
                 if (dt < now.AddDays(-180)) dt = dt.AddYears(1);
-                return dt;
+                return DateTime.SpecifyKind(dt, DateTimeKind.Local);
             }
             if (DateTime.TryParseExact(s, TimeFormats, En, DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.NoCurrentDateDefault, out dt))
             {
                 DateTime t = now.Date + dt.TimeOfDay;
                 if (t < now.AddMinutes(-1)) t = t.AddDays(1);
-                return t;
+                return DateTime.SpecifyKind(t, DateTimeKind.Local);
             }
             return null;
         }

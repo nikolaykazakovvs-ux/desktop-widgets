@@ -1,0 +1,175 @@
+{
+  "schemaVersion": "1.0.0",
+  "mode": "fixture",
+  "kind": "hardware-snapshot",
+  "source_id": "resources-widget",
+  "measured_at": null,
+  "published_at": "2026-01-01T11:59:59Z",
+  "last_attempt_at": "2026-01-01T11:59:58Z",
+  "status": "partial",
+  "reason": "sensor_unavailable",
+  "sample_interval_ms": 1000,
+  "metrics": {
+    "cpu_usage_percent": {
+      "value": null,
+      "unit": "percent",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "ram_total_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "ram_available_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "commit_total_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "commit_limit_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "commit_headroom_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "vram_total_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "vram_available_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "swap_used_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "network_receive_bytes_per_second": {
+      "value": null,
+      "unit": "bytes_per_second",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "network_send_bytes_per_second": {
+      "value": null,
+      "unit": "bytes_per_second",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "network_reachability": {
+      "value": null,
+      "unit": "reachability",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null,
+      "scope": "not_measured",
+      "provider_id": null
+    },
+    "cpu_temperature_celsius": {
+      "value": null,
+      "unit": "celsius",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "gpu_temperature_celsius": {
+      "value": null,
+      "unit": "celsius",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "gpu_usage_percent": {
+      "value": null,
+      "unit": "percent",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "gpu_memory_total_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "gpu_memory_available_bytes": {
+      "value": null,
+      "unit": "bytes",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null
+    },
+    "gateway_rtt_ms": {
+      "value": null,
+      "unit": "milliseconds",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null,
+      "scope": "gateway",
+      "probe_interval_ms": 2000
+    },
+    "internet_rtt_ms": {
+      "value": null,
+      "unit": "milliseconds",
+      "status": "unknown",
+      "reason": "sensor_unavailable",
+      "measured_at": null,
+      "scope": "internet_probe",
+      "probe_interval_ms": 2000
+    }
+  },
+  "gpu_memory_kind": "dedicated",
+  "network_quality": {
+    "status": "unknown",
+    "reason": "sensor_unavailable",
+    "measured_at": null,
+    "window_kind": "local_calendar_day",
+    "window_start": null,
+    "window_end": null,
+    "coverage_scope": "widget_observed_only",
+    "coverage_seconds": null,
+    "coverage_unit": "seconds",
+    "count_unit": "count",
+    "loss_unit": "percent",
+    "internet_sent": null,
+    "internet_lost": null,
+    "internet_loss_percent": null,
+    "gateway_sent": null,
+    "gateway_lost": null,
+    "gateway_loss_percent": null,
+    "outages_count": null,
+    "disconnect_count": null
+  }
+}

@@ -1,0 +1,427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.desktop-widgets.invalid/telemetry/1.0.0/bridge-output.schema.json",
+  "title": "bridge-output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "mode": {
+      "enum": [
+        "fixture",
+        "live"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "policy_version": {
+      "const": "0.1.0"
+    },
+    "hardware_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "partial",
+            "unavailable",
+            "error"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "sensor_unavailable",
+            "not_supported",
+            "collection_failed",
+            "source_unavailable",
+            "source_stale",
+            "source_partial",
+            "publisher_silent",
+            "invalid_input",
+            "clock_invalid",
+            "reset_unverified",
+            "access_denied",
+            "transient_io_error"
+          ]
+        },
+        "liveness": {
+          "enum": [
+            "alive",
+            "silent",
+            "unknown"
+          ]
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "hardware-snapshot.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu_usage_percent": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "ram_total_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "ram_available_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "commit_total_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "commit_limit_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "commit_headroom_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "vram_total_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "vram_available_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "swap_used_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "network_receive_bytes_per_second": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "network_send_bytes_per_second": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "network_reachability": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "cpu_temperature_celsius": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "gpu_temperature_celsius": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "gpu_usage_percent": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "gpu_memory_total_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "gpu_memory_available_bytes": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "gateway_rtt_ms": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            },
+            "internet_rtt_ms": {
+              "$ref": "common.schema.json#/$defs/assessment"
+            }
+          },
+          "required": [
+            "cpu_usage_percent",
+            "ram_total_bytes",
+            "ram_available_bytes",
+            "commit_total_bytes",
+            "commit_limit_bytes",
+            "commit_headroom_bytes",
+            "vram_total_bytes",
+            "vram_available_bytes",
+            "swap_used_bytes",
+            "network_receive_bytes_per_second",
+            "network_send_bytes_per_second",
+            "network_reachability",
+            "cpu_temperature_celsius",
+            "gpu_temperature_celsius",
+            "gpu_usage_percent",
+            "gpu_memory_total_bytes",
+            "gpu_memory_available_bytes",
+            "gateway_rtt_ms",
+            "internet_rtt_ms"
+          ]
+        },
+        "read_status": {
+          "enum": [
+            "ok",
+            "missing",
+            "invalid_input",
+            "clock_invalid",
+            "transient_io_error",
+            "access_denied"
+          ]
+        },
+        "network_quality": {
+          "$ref": "common.schema.json#/$defs/assessment"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "liveness",
+        "freshness",
+        "source",
+        "metrics",
+        "read_status",
+        "network_quality"
+      ]
+    },
+    "subscription_quotas": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "partial",
+            "unavailable",
+            "error"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "sensor_unavailable",
+            "not_supported",
+            "collection_failed",
+            "source_unavailable",
+            "source_stale",
+            "source_partial",
+            "publisher_silent",
+            "invalid_input",
+            "clock_invalid",
+            "reset_unverified",
+            "access_denied",
+            "transient_io_error"
+          ]
+        },
+        "liveness": {
+          "enum": [
+            "alive",
+            "silent",
+            "unknown"
+          ]
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "quotas-snapshot.schema.json"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "provider_id": {
+                "enum": [
+                  "codex",
+                  "claude",
+                  "antigravity",
+                  "gemini",
+                  "kimi"
+                ]
+              },
+              "pool_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "window_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "freshness": {
+                "enum": [
+                  "fresh",
+                  "stale",
+                  "unknown"
+                ]
+              },
+              "age_ms": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reset_time_passed_unverified": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "remaining_percent": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "resets_at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "provider_id",
+              "pool_id",
+              "window_id",
+              "freshness",
+              "age_ms",
+              "reset_time_passed_unverified",
+              "remaining_percent",
+              "resets_at"
+            ]
+          },
+          "maxItems": 16384
+        },
+        "read_status": {
+          "enum": [
+            "ok",
+            "missing",
+            "invalid_input",
+            "clock_invalid",
+            "transient_io_error",
+            "access_denied"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "liveness",
+        "freshness",
+        "source",
+        "windows",
+        "read_status"
+      ]
+    },
+    "api_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "not_available"
+        },
+        "reason": {
+          "const": "monitor_not_implemented"
+        }
+      },
+      "required": [
+        "status",
+        "reason"
+      ]
+    },
+    "orchestration_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy_version": {
+          "const": "0.1.0"
+        },
+        "resource_pressure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "physical_memory": {
+              "$ref": "common.schema.json#/$defs/pressure"
+            },
+            "commit_memory": {
+              "$ref": "common.schema.json#/$defs/pressure"
+            },
+            "vram": {
+              "$ref": "common.schema.json#/$defs/pressure"
+            },
+            "cpu": {
+              "$ref": "common.schema.json#/$defs/pressure"
+            }
+          },
+          "required": [
+            "physical_memory",
+            "commit_memory",
+            "vram",
+            "cpu"
+          ]
+        },
+        "data_quality": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "hardware_unavailable",
+              "hardware_stale",
+              "quotas_unavailable",
+              "quotas_stale",
+              "publisher_silent",
+              "unknown_metrics",
+              "quota_reset_unverified"
+            ]
+          }
+        }
+      },
+      "required": [
+        "policy_version",
+        "resource_pressure",
+        "data_quality"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "mode",
+    "generated_at",
+    "policy_version",
+    "hardware_state",
+    "subscription_quotas",
+    "api_limits",
+    "orchestration_hints"
+  ]
+}

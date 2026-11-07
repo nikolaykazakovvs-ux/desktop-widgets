@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.desktop-widgets.invalid/telemetry/1.0.0/quotas-snapshot.schema.json",
+  "title": "quotas-snapshot.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "mode": {
+      "enum": [
+        "fixture",
+        "live"
+      ]
+    },
+    "measured_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "last_attempt_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "unavailable",
+        "error"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "none",
+        "sensor_unavailable",
+        "not_supported",
+        "collection_failed",
+        "source_unavailable",
+        "source_stale",
+        "source_partial",
+        "publisher_silent",
+        "invalid_input",
+        "clock_invalid",
+        "reset_unverified",
+        "access_denied",
+        "transient_io_error"
+      ]
+    },
+    "kind": {
+      "const": "quotas-snapshot"
+    },
+    "source_id": {
+      "const": "limits-widget"
+    },
+    "poll_interval_ms": {
+      "type": "integer",
+      "minimum": 60000,
+      "maximum": 86400000
+    },
+    "heartbeat_interval_ms": {
+      "const": 10000
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/provider"
+      },
+      "maxItems": 16
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "mode",
+    "measured_at",
+    "published_at",
+    "last_attempt_at",
+    "status",
+    "reason",
+    "kind",
+    "source_id",
+    "poll_interval_ms",
+    "heartbeat_interval_ms",
+    "providers"
+  ]
+}

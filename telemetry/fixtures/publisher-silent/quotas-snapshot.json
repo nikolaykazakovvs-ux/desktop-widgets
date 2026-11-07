@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0.0",
+  "mode": "fixture",
+  "kind": "quotas-snapshot",
+  "source_id": "limits-widget",
+  "measured_at": "2026-01-01T11:58:00Z",
+  "published_at": "2026-01-01T11:58:00Z",
+  "last_attempt_at": "2026-01-01T11:58:00Z",
+  "status": "ok",
+  "reason": "none",
+  "poll_interval_ms": 300000,
+  "heartbeat_interval_ms": 10000,
+  "providers": [
+    {
+      "provider_id": "codex",
+      "status": "ok",
+      "reason": "none",
+      "measured_at": "2026-01-01T11:58:00Z",
+      "last_attempt_at": "2026-01-01T11:58:00Z",
+      "pools": [
+        {
+          "pool_id": "subscription.general",
+          "model_ids": [
+            "codex.general"
+          ],
+          "windows": [
+            {
+              "window_id": "five_hour",
+              "duration_seconds": 18000,
+              "status": "ok",
+              "reason": "none",
+              "measured_at": "2026-01-01T11:58:00Z",
+              "last_attempt_at": "2026-01-01T11:58:00Z",
+              "used_percent": 30,
+              "remaining_percent": 70,
+              "resets_at": "2026-01-01T13:00:00Z"
+            },
+            {
+              "window_id": "seven_day",
+              "duration_seconds": 604800,
+              "status": "ok",
+              "reason": "none",
+              "measured_at": "2026-01-01T11:58:00Z",
+              "last_attempt_at": "2026-01-01T11:58:00Z",
+              "used_percent": 50,
+              "remaining_percent": 50,
+              "resets_at": "2026-01-05T12:00:00Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

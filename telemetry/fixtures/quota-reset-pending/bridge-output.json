@@ -1,0 +1,431 @@
+{
+  "schemaVersion": "1.0.0",
+  "mode": "fixture",
+  "generated_at": "2026-01-01T12:00:00Z",
+  "policy_version": "0.1.0",
+  "hardware_state": {
+    "status": "ok",
+    "reason": "none",
+    "liveness": "alive",
+    "freshness": "fresh",
+    "read_status": "ok",
+    "source": {
+      "schemaVersion": "1.0.0",
+      "mode": "fixture",
+      "kind": "hardware-snapshot",
+      "source_id": "resources-widget",
+      "measured_at": "2026-01-01T11:59:58Z",
+      "published_at": "2026-01-01T11:59:59Z",
+      "last_attempt_at": "2026-01-01T11:59:58Z",
+      "status": "ok",
+      "reason": "none",
+      "sample_interval_ms": 1000,
+      "metrics": {
+        "cpu_usage_percent": {
+          "value": 25,
+          "unit": "percent",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "ram_total_bytes": {
+          "value": 34359738368,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "ram_available_bytes": {
+          "value": 17179869184,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "commit_total_bytes": {
+          "value": 25769803776,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "commit_limit_bytes": {
+          "value": 68719476736,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "commit_headroom_bytes": {
+          "value": 42949672960,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "vram_total_bytes": {
+          "value": 8589934592,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "vram_available_bytes": {
+          "value": 6442450944,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "swap_used_bytes": {
+          "value": 2147483648,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "network_receive_bytes_per_second": {
+          "value": 65536,
+          "unit": "bytes_per_second",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "network_send_bytes_per_second": {
+          "value": 8192,
+          "unit": "bytes_per_second",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "network_reachability": {
+          "value": "reachable",
+          "unit": "reachability",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z",
+          "scope": "gateway",
+          "provider_id": null
+        },
+        "cpu_temperature_celsius": {
+          "value": 48.5,
+          "unit": "celsius",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "gpu_temperature_celsius": {
+          "value": 52.0,
+          "unit": "celsius",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "gpu_usage_percent": {
+          "value": 20,
+          "unit": "percent",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "gpu_memory_total_bytes": {
+          "value": 8589934592,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "gpu_memory_available_bytes": {
+          "value": 6442450944,
+          "unit": "bytes",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z"
+        },
+        "gateway_rtt_ms": {
+          "value": 1.5,
+          "unit": "milliseconds",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z",
+          "scope": "gateway",
+          "probe_interval_ms": 2000
+        },
+        "internet_rtt_ms": {
+          "value": 24.0,
+          "unit": "milliseconds",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:59:58Z",
+          "scope": "internet_probe",
+          "probe_interval_ms": 2000
+        }
+      },
+      "gpu_memory_kind": "dedicated",
+      "network_quality": {
+        "status": "ok",
+        "reason": "none",
+        "measured_at": "2026-01-01T11:59:58Z",
+        "window_kind": "local_calendar_day",
+        "window_start": "2026-01-01T00:00:00Z",
+        "window_end": "2026-01-02T00:00:00Z",
+        "coverage_scope": "widget_observed_only",
+        "coverage_seconds": 3600,
+        "coverage_unit": "seconds",
+        "count_unit": "count",
+        "loss_unit": "percent",
+        "internet_sent": 100,
+        "internet_lost": 1,
+        "internet_loss_percent": 1,
+        "gateway_sent": 100,
+        "gateway_lost": 0,
+        "gateway_loss_percent": 0,
+        "outages_count": 0,
+        "disconnect_count": 0
+      }
+    },
+    "metrics": {
+      "cpu_usage_percent": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "ram_total_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "ram_available_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "commit_total_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "commit_limit_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "commit_headroom_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "vram_total_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "vram_available_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "swap_used_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "network_receive_bytes_per_second": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "network_send_bytes_per_second": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "network_reachability": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "cpu_temperature_celsius": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "gpu_temperature_celsius": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "gpu_usage_percent": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "gpu_memory_total_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "gpu_memory_available_bytes": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "gateway_rtt_ms": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      },
+      "internet_rtt_ms": {
+        "freshness": "fresh",
+        "age_ms": 2000
+      }
+    },
+    "network_quality": {
+      "freshness": "fresh",
+      "age_ms": 2000
+    }
+  },
+  "subscription_quotas": {
+    "status": "ok",
+    "reason": "none",
+    "liveness": "alive",
+    "freshness": "fresh",
+    "read_status": "ok",
+    "source": {
+      "schemaVersion": "1.0.0",
+      "mode": "fixture",
+      "kind": "quotas-snapshot",
+      "source_id": "limits-widget",
+      "measured_at": "2026-01-01T11:58:00Z",
+      "published_at": "2026-01-01T11:59:59Z",
+      "last_attempt_at": "2026-01-01T11:58:00Z",
+      "status": "ok",
+      "reason": "none",
+      "poll_interval_ms": 300000,
+      "heartbeat_interval_ms": 10000,
+      "providers": [
+        {
+          "provider_id": "codex",
+          "status": "ok",
+          "reason": "none",
+          "measured_at": "2026-01-01T11:58:00Z",
+          "last_attempt_at": "2026-01-01T11:58:00Z",
+          "pools": [
+            {
+              "pool_id": "subscription.general",
+              "model_ids": [
+                "codex.general"
+              ],
+              "windows": [
+                {
+                  "window_id": "five_hour",
+                  "duration_seconds": 18000,
+                  "status": "ok",
+                  "reason": "none",
+                  "measured_at": "2026-01-01T11:58:00Z",
+                  "last_attempt_at": "2026-01-01T11:58:00Z",
+                  "used_percent": 30,
+                  "remaining_percent": 70,
+                  "resets_at": "2026-01-01T11:59:00Z"
+                },
+                {
+                  "window_id": "seven_day",
+                  "duration_seconds": 604800,
+                  "status": "ok",
+                  "reason": "none",
+                  "measured_at": "2026-01-01T11:58:00Z",
+                  "last_attempt_at": "2026-01-01T11:58:00Z",
+                  "used_percent": 50,
+                  "remaining_percent": 50,
+                  "resets_at": "2026-01-05T12:00:00Z"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "windows": [
+      {
+        "provider_id": "codex",
+        "pool_id": "subscription.general",
+        "window_id": "five_hour",
+        "freshness": "fresh",
+        "age_ms": 120000,
+        "reset_time_passed_unverified": true,
+        "remaining_percent": null,
+        "resets_at": "2026-01-01T11:59:00Z"
+      },
+      {
+        "provider_id": "codex",
+        "pool_id": "subscription.general",
+        "window_id": "seven_day",
+        "freshness": "fresh",
+        "age_ms": 120000,
+        "reset_time_passed_unverified": false,
+        "remaining_percent": 50,
+        "resets_at": "2026-01-05T12:00:00Z"
+      }
+    ]
+  },
+  "api_limits": {
+    "status": "not_available",
+    "reason": "monitor_not_implemented"
+  },
+  "orchestration_hints": {
+    "policy_version": "0.1.0",
+    "resource_pressure": {
+      "physical_memory": {
+        "level": "normal",
+        "reason": "below_pressure_threshold",
+        "inputs": [
+          {
+            "metric_id": "ram_available_bytes",
+            "value": 17179869184,
+            "unit": "bytes",
+            "measured_at": "2026-01-01T11:59:58Z"
+          },
+          {
+            "metric_id": "ram_total_bytes",
+            "value": 34359738368,
+            "unit": "bytes",
+            "measured_at": "2026-01-01T11:59:58Z"
+          }
+        ]
+      },
+      "commit_memory": {
+        "level": "normal",
+        "reason": "below_pressure_threshold",
+        "inputs": [
+          {
+            "metric_id": "commit_headroom_bytes",
+            "value": 42949672960,
+            "unit": "bytes",
+            "measured_at": "2026-01-01T11:59:58Z"
+          },
+          {
+            "metric_id": "commit_limit_bytes",
+            "value": 68719476736,
+            "unit": "bytes",
+            "measured_at": "2026-01-01T11:59:58Z"
+          }
+        ]
+      },
+      "vram": {
+        "level": "normal",
+        "reason": "below_pressure_threshold",
+        "inputs": [
+          {
+            "metric_id": "vram_available_bytes",
+            "value": 6442450944,
+            "unit": "bytes",
+            "measured_at": "2026-01-01T11:59:58Z"
+          },
+          {
+            "metric_id": "vram_total_bytes",
+            "value": 8589934592,
+            "unit": "bytes",
+            "measured_at": "2026-01-01T11:59:58Z"
+          }
+        ]
+      },
+      "cpu": {
+        "level": "normal",
+        "reason": "below_pressure_threshold",
+        "inputs": [
+          {
+            "metric_id": "cpu_usage_percent",
+            "value": 25,
+            "unit": "percent",
+            "measured_at": "2026-01-01T11:59:58Z"
+          }
+        ]
+      }
+    },
+    "data_quality": [
+      "quota_reset_unverified"
+    ]
+  }
+}

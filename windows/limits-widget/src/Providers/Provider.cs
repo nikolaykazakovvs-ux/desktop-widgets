@@ -17,7 +17,20 @@ namespace LimitsWidget
         public ServiceConfig Svc;
         public string FixturesDir;
         public DateTime Now;
+        public bool FixtureOnly;
+        public Func<DateTime> UtcNow = () => DateTime.UtcNow;
         public State State;   // история остатка кредитов и прочее состояние; может быть null
+        public long Generation;   // номер опроса
+        // Основные квоты готовы до необязательной догрузки (статистика, кредиты): сборщик сразу отдаёт их в UI и телеметрию.
+        // Вызывается не больше одного раза; снимок после вызова провайдер может дополнять — наружу ушла копия.
+        public Action<ServiceSnapshot> Core;
+
+        public void PublishCore(ServiceSnapshot snap)
+        {
+            var cb = Core;
+            Core = null;
+            if (cb != null) cb(snap);
+        }
     }
 
     static class ProviderUtil
@@ -30,8 +43,8 @@ namespace LimitsWidget
             var s = new ServiceSnapshot();
             s.Id = id;
             s.Title = ctx.Svc.Title;
-            s.Plan = string.IsNullOrEmpty(ctx.Svc.Plan) ? null : ctx.Svc.Plan;
-            s.Url = ctx.Svc.Url;
+            s.Generation = ctx.Generation;
+            PlanResolver.Apply(s, ctx.Svc);
             return s;
         }
 
@@ -52,9 +65,13 @@ namespace LimitsWidget
 
         public static void MarkFresh(ServiceSnapshot snap, ProviderContext ctx, bool fixture)
         {
-            snap.DataTime = ctx.Now;
+            var completed = ctx.UtcNow();
+            snap.DataTime = snap.ObservationTimeUnknown ? (DateTime?)null : completed;
+            foreach (var bar in snap.Bars)
+                if (bar.Quota != null && !snap.ObservationTimeUnknown)
+                    bar.Quota.MeasuredAt = completed;
             snap.Status = fixture ? SvcStatus.Fixture : SvcStatus.Ok;
-            snap.StatusText = fixture ? "тест" : Fmt.Clock(ctx.Now);
+            snap.StatusText = fixture ? "тест" : snap.DataTime.HasValue ? Fmt.Clock(snap.DataTime.Value.ToLocalTime()) : "время неизвестно";
         }
 
         // Тестовые ответы для --fixtures; {{now+2h13m}} заменяется на ISO-время относительно текущего момента.

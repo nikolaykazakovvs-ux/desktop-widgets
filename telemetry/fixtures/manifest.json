@@ -1,0 +1,85 @@
+{
+  "synthetic": true,
+  "as_of": "2026-01-01T12:00:00Z",
+  "schemaVersion": "1.0.0",
+  "scenarios": [
+    {
+      "id": "normal",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "partial",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "offline",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "quota-reset-pending",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "low-physical-memory",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "high-commit-pressure",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "stale-with-heartbeat",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "unknown-metrics",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "publisher-silent",
+      "files": [
+        "bridge-output.json",
+        "hardware-snapshot.json",
+        "quotas-snapshot.json"
+      ]
+    },
+    {
+      "id": "cold-read-unavailable",
+      "files": [
+        "bridge-output.json"
+      ]
+    }
+  ]
+}

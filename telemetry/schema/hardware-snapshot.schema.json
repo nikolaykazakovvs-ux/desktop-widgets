@@ -1,0 +1,2435 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.desktop-widgets.invalid/telemetry/1.0.0/hardware-snapshot.schema.json",
+  "title": "hardware-snapshot.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "mode": {
+      "enum": [
+        "fixture",
+        "live"
+      ]
+    },
+    "measured_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "last_attempt_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "unavailable",
+        "error"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "none",
+        "sensor_unavailable",
+        "not_supported",
+        "collection_failed",
+        "source_unavailable",
+        "source_stale",
+        "source_partial",
+        "publisher_silent",
+        "invalid_input",
+        "clock_invalid",
+        "reset_unverified",
+        "access_denied",
+        "transient_io_error"
+      ]
+    },
+    "kind": {
+      "const": "hardware-snapshot"
+    },
+    "source_id": {
+      "const": "resources-widget"
+    },
+    "sample_interval_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400000
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu_usage_percent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "percent"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ram_total_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ram_available_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "commit_total_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "commit_limit_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "commit_headroom_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "vram_total_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "vram_available_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "swap_used_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "network_receive_bytes_per_second": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes_per_second"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "network_send_bytes_per_second": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes_per_second"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "network_reachability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "enum": [
+                "reachable",
+                "unreachable",
+                null
+              ]
+            },
+            "unit": {
+              "const": "reachability"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "enum": [
+                "not_measured",
+                "gateway",
+                "internet_probe",
+                "provider_probe"
+              ]
+            },
+            "provider_id": {
+              "enum": [
+                "codex",
+                "claude",
+                "antigravity",
+                "gemini",
+                "kimi",
+                null
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at",
+            "scope",
+            "provider_id"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "enum": [
+                      "reachable",
+                      "unreachable"
+                    ]
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  },
+                  "scope": {
+                    "enum": [
+                      "gateway",
+                      "internet_probe",
+                      "provider_probe"
+                    ]
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "provider_probe"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "provider_id": {
+                    "enum": [
+                      "codex",
+                      "claude",
+                      "antigravity",
+                      "gemini",
+                      "kimi"
+                    ]
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "provider_id": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "cpu_temperature_celsius": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "celsius"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": -100,
+                    "maximum": 200
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "gpu_temperature_celsius": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": -100,
+                  "maximum": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "celsius"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": -100,
+                    "maximum": 200
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "gpu_usage_percent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "percent"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "gpu_memory_total_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "gpu_memory_available_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "bytes"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "gateway_rtt_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 60000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "milliseconds"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "const": "gateway"
+            },
+            "probe_interval_ms": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 60000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at",
+            "scope",
+            "probe_interval_ms"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  },
+                  "probe_interval_ms": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 60000
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "internet_rtt_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 60000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unit": {
+              "const": "milliseconds"
+            },
+            "status": {
+              "enum": [
+                "ok",
+                "unknown",
+                "error",
+                "not_supported"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "none",
+                "sensor_unavailable",
+                "not_supported",
+                "collection_failed",
+                "source_unavailable",
+                "source_stale",
+                "source_partial",
+                "publisher_silent",
+                "invalid_input",
+                "clock_invalid",
+                "reset_unverified",
+                "access_denied",
+                "transient_io_error"
+              ]
+            },
+            "measured_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "const": "internet_probe"
+            },
+            "probe_interval_ms": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 60000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "status",
+            "reason",
+            "measured_at",
+            "scope",
+            "probe_interval_ms"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "ok"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 60000
+                  },
+                  "measured_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+                  },
+                  "reason": {
+                    "const": "none"
+                  },
+                  "probe_interval_ms": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 60000
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "value": {
+                    "type": "null"
+                  },
+                  "reason": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "cpu_usage_percent",
+        "ram_total_bytes",
+        "ram_available_bytes",
+        "commit_total_bytes",
+        "commit_limit_bytes",
+        "commit_headroom_bytes",
+        "vram_total_bytes",
+        "vram_available_bytes",
+        "swap_used_bytes",
+        "network_receive_bytes_per_second",
+        "network_send_bytes_per_second",
+        "network_reachability",
+        "cpu_temperature_celsius",
+        "gpu_temperature_celsius",
+        "gpu_usage_percent",
+        "gpu_memory_total_bytes",
+        "gpu_memory_available_bytes",
+        "gateway_rtt_ms",
+        "internet_rtt_ms"
+      ]
+    },
+    "gpu_memory_kind": {
+      "enum": [
+        "dedicated",
+        "shared",
+        "unknown"
+      ]
+    },
+    "network_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "partial",
+            "unknown",
+            "error",
+            "not_supported"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "none",
+            "sensor_unavailable",
+            "not_supported",
+            "collection_failed",
+            "source_unavailable",
+            "source_stale",
+            "source_partial",
+            "publisher_silent",
+            "invalid_input",
+            "clock_invalid",
+            "reset_unverified",
+            "access_denied",
+            "transient_io_error"
+          ]
+        },
+        "measured_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_kind": {
+          "const": "local_calendar_day"
+        },
+        "window_start": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_end": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage_scope": {
+          "const": "widget_observed_only"
+        },
+        "coverage_seconds": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage_unit": {
+          "const": "seconds"
+        },
+        "count_unit": {
+          "const": "count"
+        },
+        "loss_unit": {
+          "const": "percent"
+        },
+        "internet_sent": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "internet_lost": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gateway_sent": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gateway_lost": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outages_count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disconnect_count": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "internet_loss_percent": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gateway_loss_percent": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "measured_at",
+        "window_kind",
+        "window_start",
+        "window_end",
+        "coverage_scope",
+        "coverage_seconds",
+        "coverage_unit",
+        "count_unit",
+        "loss_unit",
+        "internet_sent",
+        "internet_lost",
+        "gateway_sent",
+        "gateway_lost",
+        "outages_count",
+        "disconnect_count",
+        "internet_loss_percent",
+        "gateway_loss_percent"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "mode",
+    "measured_at",
+    "published_at",
+    "last_attempt_at",
+    "status",
+    "reason",
+    "kind",
+    "source_id",
+    "sample_interval_ms",
+    "metrics",
+    "gpu_memory_kind",
+    "network_quality"
+  ]
+}
