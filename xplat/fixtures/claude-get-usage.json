@@ -1,0 +1,1 @@
+{"rate_limits":{"five_hour":{"utilization":34,"resets_at":"2030-01-01T02:13:00Z"},"seven_day":{"utilization":61,"resets_at":"2030-01-04T22:00:00Z"},"seven_day_opus":{"utilization":12,"resets_at":"2030-01-04T22:00:00Z"},"extra_usage":{"is_enabled":true,"used_credits":1250,"monthly_limit":5000,"currency":"USD","decimal_places":2}}}

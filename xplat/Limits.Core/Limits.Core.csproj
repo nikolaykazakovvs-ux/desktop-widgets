@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Общее ядро: модели, разбор ответов провайдера, проекция в контракт quotas-snapshot 1.0.0.
+       Без запуска процессов, путей ОС, файлового ввода-вывода и UI — всё это приходит через интерфейсы из Ports.cs. -->
+  <PropertyGroup>
+    <RootNamespace>DesktopWidgets.Limits.Core</RootNamespace>
+    <AssemblyName>DesktopWidgets.Limits.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DesktopWidgets.Limits.Tests" />
+  </ItemGroup>
+</Project>

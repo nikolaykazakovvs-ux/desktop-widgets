@@ -1,0 +1,97 @@
+name: Cross-platform Limits prototype (Avalonia)
+
+on:
+  push:
+    branches:
+      - 'feat/**'
+    paths:
+      - 'xplat/**'
+      - 'telemetry/**'
+      - '.github/workflows/xplat-ci.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'xplat/**'
+      - 'telemetry/**'
+      - '.github/workflows/xplat-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  NO_COLOR: '1'
+  ANTHROPIC_API_KEY: ''
+
+jobs:
+  xplat:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned schema validator
+        run: python -m pip install --disable-pip-version-check -r telemetry/tests/requirements.txt
+
+      - name: Build
+        run: dotnet build xplat/Limits.Xplat.sln -c Release
+
+      - name: Unit and platform tests (core, CLI runner, telemetry writer, placement, wake)
+        shell: bash
+        env:
+          XPLAT_CONTRACT_OUT: ${{ runner.temp }}/xplat-contract
+        run: dotnet run --project xplat/Limits.Tests -c Release --no-build
+
+      - name: Validate emitted snapshots against quotas-snapshot 1.0.0
+        shell: bash
+        run: python xplat/scripts/validate_contract.py "$RUNNER_TEMP/xplat-contract"
+
+      - name: Window/tray self-test (macOS, fixture data)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          SUSPEND_S=25 xplat/scripts/selftest-unix.sh "$RUNNER_TEMP/st" --fixture-usage xplat/fixtures/claude-get-usage.json --telemetry-dir "$RUNNER_TEMP/tele" --config-dir "$RUNNER_TEMP/cfg"
+          cat "$RUNNER_TEMP/st/report.json" "$RUNNER_TEMP/st/memory-os.txt"
+          python xplat/scripts/validate_contract.py "$RUNNER_TEMP/st/quotas-snapshot.json"
+
+      - name: Window/tray self-test (Windows, fixture data)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./xplat/scripts/selftest-windows.ps1 -OutDir "$env:RUNNER_TEMP/st" -AppArgs @('--fixture-usage', 'xplat/fixtures/claude-get-usage.json', '--telemetry-dir', "$env:RUNNER_TEMP\tele", '--config-dir', "$env:RUNNER_TEMP\cfg")
+          python xplat/scripts/validate_contract.py "$env:RUNNER_TEMP/st/quotas-snapshot.json"
+
+      - name: Window self-test (Linux, Xvfb; tray needs a StatusNotifier host — informational)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libice6 libsm6 libfontconfig1 >/dev/null
+          SUSPEND_S=25 xvfb-run -a xplat/scripts/selftest-unix.sh "$RUNNER_TEMP/st" --fixture-usage xplat/fixtures/claude-get-usage.json --telemetry-dir "$RUNNER_TEMP/tele" --config-dir "$RUNNER_TEMP/cfg"
+          cat "$RUNNER_TEMP/st/report.json"
+
+      - name: Upload self-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xplat-selftest-${{ matrix.os }}
+          path: ${{ runner.temp }}/st
+          if-no-files-found: ignore

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Прототип UI «Лимитов» на Avalonia: одно приложение для Windows, macOS и Linux. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>DesktopWidgets.Limits.App</RootNamespace>
+    <AssemblyName>LimitsXplat</AssemblyName>
+    <ApplicationIcon>Assets/LimitsWidget.ico</ApplicationIcon>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Limits.Core\Limits.Core.csproj" />
+    <ProjectReference Include="..\Limits.Platform\Limits.Platform.csproj" />
+  </ItemGroup>
+</Project>

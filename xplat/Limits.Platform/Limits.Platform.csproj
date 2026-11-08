@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Платформенный слой: пути ОС, поиск и запуск CLI, запись снимка телеметрии с правами ОС, сон/пробуждение.
+       Всё, что различается между Windows, macOS и Linux, живёт здесь и выбирается во время выполнения. -->
+  <PropertyGroup>
+    <RootNamespace>DesktopWidgets.Limits.Platform</RootNamespace>
+    <AssemblyName>DesktopWidgets.Limits.Platform</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Limits.Core\Limits.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DesktopWidgets.Limits.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,14 @@
+<Project>
+  <!-- Кроссплатформенный прототип «Лимитов» (Avalonia). Работающая WPF-версия в windows/ не затрагивается. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Version>0.1.0</Version>
+    <Authors>Svetomir</Authors>
+    <Copyright>Copyright (c) 2026 Svetomir</Copyright>
+  </PropertyGroup>
+</Project>
