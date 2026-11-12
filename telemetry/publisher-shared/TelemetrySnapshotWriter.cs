@@ -46,7 +46,7 @@ namespace DesktopWidgets.Telemetry
         public TelemetrySnapshotWriter(TelemetryWriterOptions options)
         {
             if (options == null) throw new ArgumentNullException("options");
-            if (options.FileName != "hardware-snapshot.json" && options.FileName != "quotas-snapshot.json") throw new ArgumentException("file_name");
+            if (options.FileName != "hardware-snapshot.json" && options.FileName != "quotas-snapshot.json" && options.FileName != "api-balances-snapshot.json") throw new ArgumentException("file_name");
             if (options.Mode != "live" && options.Mode != "fixture") throw new ArgumentException("mode");
             if (options.MinIntervalMs < 1 || options.MinIntervalMs > 86400000) throw new ArgumentException("interval");
             string selected = options.DirectoryPath;

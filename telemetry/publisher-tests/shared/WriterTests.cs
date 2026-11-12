@@ -111,6 +111,10 @@ static class WriterTests
             Check(rejected, "unc_rejected"); rejected = false;
             try { using (var bad = New(dir, "foreign.json")) { } } catch (ArgumentException) { rejected = true; }
             Check(rejected, "filename_allowlist");
+            using (var balances = New(dir, "api-balances-snapshot.json")) { balances.Submit(_ => "{\"b\":1}"); Until(() => balances.PublishedCount == 1, "api_balances_name"); Check(Read(balances.TargetPath) == "{\"b\":1}", "api_balances_filename_accepted"); }
+            rejected = false;
+            try { using (var bad = New(dir, "api-balances-snapshot.json.bak")) { } } catch (ArgumentException) { rejected = true; }
+            Check(rejected, "api_balances_name_must_be_exact");
             rejected = false;
             try { using (var bad = New(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopWidgets", "telemetry"), "hardware-snapshot.json")) { } } catch (ArgumentException) { rejected = true; }
             Check(rejected, "fixture_standard_live_directory_rejected");
