@@ -1,6 +1,8 @@
-# AI Telemetry Bridge: установка
+# Мост виджетов (AI Telemetry Bridge): установка
 
-Статус: **реализовано; проверено в изолированном каталоге; в рабочие клиенты не установлено.** Отдельной приёмки установки нет.
+Имя продукта — **Мост виджетов** (Widgets Bridge); команда и MCP-сервер — `widgets-bridge` (решение оператора 12.11.2026).
+
+Статус: **реализовано; проверено в изолированном каталоге и на фиктивных конфигурациях клиентов; в рабочие клиенты не установлено.** Отдельной приёмки установки нет.
 
 ## Требования
 
@@ -10,8 +12,10 @@
 ## Установка
 
 ```powershell
-pwsh telemetry\packaging\Install-Bridge.ps1 -SourceRoot <repo> [-InstallRoot <abs>]
+pwsh telemetry\packaging\Install-Bridge.ps1 -SourceRoot <repo> [-InstallRoot <abs>] [-RegisterClients]
 ```
+
+Без `-RegisterClients` конфигурации клиентов не меняются. Флаг идемпотентно прописывает MCP-сервер `widgets-bridge` в найденных клиентах (см. «Автоподключение агентов»).
 
 По умолчанию `%LOCALAPPDATA%\DesktopWidgets\bridge`. Лаунчеры и модули исполняются от имени клиента оператора, поэтому `InstallRoot` должен быть закрыт для других учётных записей:
 
@@ -24,21 +28,84 @@ pwsh telemetry\packaging\Install-Bridge.ps1 -SourceRoot <repo> [-InstallRoot <ab
 ```
 <InstallRoot>\versions\<версия>-<12 hex sha256>\{bridge,schema,fixtures,manifest.json}
 <InstallRoot>\current.json          {current, previous, installed_at}
-<InstallRoot>\bridge-server.cmd     лаунчер MCP (stdio)
-<InstallRoot>\bridge-cli.cmd        лаунчер CLI
+<InstallRoot>\widgets-bridge-server.cmd   лаунчер MCP (stdio)
+<InstallRoot>\widgets-bridge.cmd          лаунчер CLI
+<InstallRoot>\discovery.json              точка обнаружения для агентов
+<InstallRoot>\bridge-server.cmd, bridge-cli.cmd   прежние имена пилота, оставлены для совместимости
 ```
+
+Лаунчеры пишутся для `%~dp0` (путь не зашит), прежние `bridge-*.cmd` ведут на те же файлы версии. В документах и конфигурациях клиентов используются только новые имена.
 
 Версия собирается в `staging\<guid>` и переименовывается в `versions\<id>`; существующий каталог не перезаписывается (повторная установка того же содержимого идемпотентна после проверки manifest). `current.json` и лаунчеры переключаются атомарно (temp + replace).
 
 ## Регистрация в клиентах
 
-Скрипты по умолчанию ничего не пишут в рабочие профили; перед записью делают резервную копию конфигурации (`*.bak-<время>`).
+Основной путь — автоматический, см. «Автоподключение агентов» ниже. Ручные помощники одного клиента остаются (имя записи — `widgets-bridge`); они по умолчанию ничего не пишут в рабочие профили и перед записью делают резервную копию (`*.bak-<время>`):
 
-- **Codex**: `telemetry\clients\codex\register-codex.ps1` печатает TOML-фрагмент `[mcp_servers.ai_telemetry_bridge]`; запись только с `-CodexHome <abs>` (реальный `~\.codex` — только с `-ConfirmRealHome`). Шаблон: `config.toml.example`.
-- **Claude Code**: `telemetry\clients\claude-code\register-claude.ps1 -ClaudeConfigDir <abs>` выполняет `claude mcp add-json --scope user ai_telemetry_bridge '<json>'` с `CLAUDE_CONFIG_DIR` только для дочернего процесса; `-PrintOnly` печатает команду. Шаблон: `mcp.json.example`.
-- **Antigravity**: CLI `agy.exe mcp add [flags] <name> <commandOrUrl> [args...]` (флаги до имени). Для Bridge: `agy.exe mcp add ai_telemetry_bridge "<InstallRoot>\bridge-server.cmd"`. Помощник регистрации не написан; команда не выполнялась (проверен только `--help`).
+- **Codex**: `telemetry\clients\codex\register-codex.ps1` печатает TOML-фрагмент `[mcp_servers.widgets-bridge]`; запись только с `-CodexHome <abs>` (реальный `~\.codex` — только с `-ConfirmRealHome`). Шаблон: `config.toml.example`.
+- **Claude Code**: `telemetry\clients\claude-code\register-claude.ps1 -ClaudeConfigDir <abs>` выполняет `claude mcp add-json --scope user widgets-bridge '<json>'` с `CLAUDE_CONFIG_DIR` только для дочернего процесса; `-PrintOnly` печатает команду. Шаблон: `mcp.json.example`.
+- **Antigravity**: CLI `agy.exe mcp add [flags] <name> <commandOrUrl> [args...]` (флаги до имени); для моста — `agy.exe mcp add widgets-bridge "<InstallRoot>\widgets-bridge-server.cmd"`. Отдельный помощник не нужен: `Register-Clients.ps1` правит тот же файл, который показывает `agy.exe mcp list`.
 
 Инструмент MCP: `get_telemetry_and_quotas`.
+
+## Автоподключение агентов
+
+Порядок для агента (решение оператора 12.11.2026): MCP-инструменты `widgets-bridge`, если они есть в сессии → `widgets-bridge facts --json` → только пока моста нет — сырой `state.json`. MCP клиенты подключают при старте сессии, поэтому основа — файл обнаружения и CLI, MCP — дополнительный слой. Мост только читает опубликованные снимки: без вызовов API провайдеров и UI-refresh; устаревшее или неизвестное — `NO_DATA`.
+
+### `discovery.json`
+
+`Install-Bridge.ps1` (и `Update-Bridge.ps1`, и `-Rollback`) после успешного переключения версии атомарно пишет `<InstallRoot>\discovery.json` (по умолчанию `%LOCALAPPDATA%\DesktopWidgets\bridge\discovery.json`); `Uninstall-Bridge.ps1` его удаляет. Откат переписывает файл под возвращённую версию. Поля (`schemaVersion` файла — своя, `1.0.0`):
+
+| Поле | Содержимое |
+|---|---|
+| `kind`, `name` | `widgets-bridge-discovery`, `widgets-bridge` |
+| `bridge` | `version_id` (id из `current.json`), `package_version`, `installed_at`, `install_root` |
+| `telemetry_contract` | `schemaVersion`, `policy_version` ответа и `api_limits_extension`, взятые из установленной версии |
+| `capabilities` | `facts`, `api_limits` — что умеет **установленная** версия (определяется по её собственным файлам: подкоманда `facts` в `bridge\options.mjs`, расширение в `core.mjs` и чтение `api-balances-snapshot.json` в `reader.mjs`), а не текущие исходники |
+| `launchers` | абсолютные пути `cli` (`widgets-bridge.cmd`) и `mcp_server` (`widgets-bridge-server.cmd`) |
+| `commands` | `facts` — строка вызова `facts --json`, **только если установленная версия её поддерживает**; `cli` — вызов без подкоманды (есть всегда, тот же выход); `mcp` — `server_name`, `transport`, `command`, `args`, `tools` |
+| `telemetry_dir`, `data` | каталог снимков `%LOCALAPPDATA%\DesktopWidgets\telemetry` и перечень данных: `subscription_quotas` (`quotas-snapshot.json`), `hardware_state` (`hardware-snapshot.json`), `api_limits` (`api-balances-snapshot.json`, расширение контракта, `optional: true`; записывается, только если установленная версия умеет это расширение) |
+
+Секретов в файле нет. Приватность: пути абсолютные и содержат каталог профиля пользователя (в том числе имя пользователя) — это неизбежно для запуска; файл лежит только в каталоге установки на этой машине и в репозиторий не попадает. Свежесть и статусы в файле не хранятся: их возвращает только `facts` (или MCP-инструмент), проверив снимки по контракту. `Test-BridgeHealth.ps1` проверяет файл (тип, версия совпадает с `current.json`, лаунчеры существуют, `capabilities` согласованы с `commands`) и вызывает CLI так, как записано в файле. Агенту: если `commands.facts` нет, версия не знает подкоманду `facts` — используйте `commands.cli` (тот же выход).
+
+### `widgets-bridge facts --json`
+
+```powershell
+& "<InstallRoot>\widgets-bridge.cmd" facts --json
+```
+
+Стабильная точка для любого агента с оболочкой. `facts` — синоним прежнего вызова без подкоманды (`bridge-cli.cmd` и `node cli.mjs` работают как раньше): выход — тот же проверенный по контракту `bridge-output` (один JSON на stdout, код 0; код 2 — ошибка конфигурации). `--json` — пустой флаг для читаемости вызова; допустимы прежние `--telemetry-dir`, `--fixture`, `--as-of`, `--diagnostics`. Подкоманда допустима только первым аргументом и только у CLI (MCP-сервер её не принимает). После отката на версию, собранную до появления `facts`, подкоманды нет: `discovery.json` это отражает (нет `commands.facts`), вызывайте `commands.cli`.
+
+### `Register-Clients.ps1`
+
+```powershell
+pwsh telemetry\packaging\Register-Clients.ps1 [-InstallRoot <abs>] [-Remove] [-IncludeOtherInstalls] [-Clients <id,...>] [-WhatIf]
+```
+
+Регистрирует `<InstallRoot>\widgets-bridge-server.cmd` как MCP-сервер `widgets-bridge`; без `-Remove` лаунчер должен существовать. Вывод — JSON-отчёт по клиентам: `registered`, `updated` (запись была, но указывала на другой лаунчер), `already`, `removed`, `not_registered` (снимать нечего), `kept_other_install` (запись указывает на другую установку; удалить — `-IncludeOtherInstalls`), `not_found` (клиент не найден, файлы не создаются), `unsupported`, `error`; код возврата 1 при любом `error`. Если запущены процессы клиентов (`claude`, `codex`, `kimi`, `agy`, `Antigravity`), отчёт получает `warnings` (запись при этом не отменяется). `-WhatIf` показывает план, ничего не меняя. `Install-Bridge.ps1 -RegisterClients` вызывает регистрацию, `Update-Bridge.ps1 -RegisterClients` перерегистрирует; `Uninstall-Bridge.ps1` по умолчанию снимает регистрацию (только запись, указывающую на лаунчер этой установки; `-KeepRegistration` отключает). Без флагов Install и Update в клиентах ничего не меняют. Установка и обновление при ошибке регистрации (в том числе исключении самого шага) всё равно печатают JSON-отчёт установки, ошибка попадает в `registration`, код возврата 1; `warnings` регистратора переносятся в отчёт установки и деинсталляции полем `registration_warnings`; относительный `-ClientsHomeDir` отклоняется до начала установки. Откат версии клиентов не затрагивает: запись указывает на лаунчер, а не на версию.
+
+**Перед регистрацией и снятием закройте агентских клиентов (Claude Code, Codex, Kimi, Antigravity), после регистрации запустите их заново.** Открытый клиент хранит конфигурацию в памяти и может молча затереть запись уже после того, как отчёт показал `registered` (и наоборот, вернуть снятую запись). Проверка результата — повторный запуск `Register-Clients.ps1` после первого запуска клиента: статус `already` подтверждает, что запись пережила его.
+
+Адаптеры (по одному на клиента; формат установлен чтением реальных конфигураций этой машины без записи и справки CLI):
+
+| Клиент (`-Clients`) | Файл | Запись | Статус |
+|---|---|---|---|
+| `claude-code` | `%USERPROFILE%\.claude.json` (при `CLAUDE_CONFIG_DIR` — `<каталог>\.claude.json`), ключ `mcpServers` пользовательской области | `{"type": "stdio", "command": "<лаунчер>", "args": []}` | поддержан; найден, только если файл существует |
+| `codex` | `%USERPROFILE%\.codex\config.toml` (при `CODEX_HOME` — `<каталог>\config.toml`) | блок `[mcp_servers.widgets-bridge]`: `command` (литеральная строка), `args = []`, `startup_timeout_sec = 20`, `tool_timeout_sec = 30` | поддержан |
+| `kimi-code` | `%USERPROFILE%\.kimi-code\mcp.json` (при `KIMI_CODE_HOME` — `<каталог>\mcp.json`), ключ `mcpServers` | `{"command": "<лаунчер>", "args": [], "startupTimeoutMs": 20000, "toolTimeoutMs": 30000}` | поддержан |
+| `antigravity` | `%USERPROFILE%\.gemini\config\mcp_config.json`, ключ `mcpServers` (его же показывает `agy.exe mcp list`) | `{"command": "<лаунчер>", "args": []}` | поддержан |
+| `gemini-cli` | — | — | `unsupported`: Gemini CLI на машине не установлен, файл, принадлежащий только ему, не подтверждён (`~\.gemini\settings.json` общий с другими инструментами) |
+
+Гарантии правки конфигурации:
+
+- JSON разбирается `System.Text.Json` (`Utf8JsonReader`), TOML — структурным сканером (строки, многострочные строки, массивы, комментарии, кавычечные ключи); правка — точечная вставка или удаление фрагмента по найденным позициям: остальные байты файла (чужие записи, порядок и форматирование, BOM, стиль перевода строк, текст чисел) не меняются. Добавление и последующее снятие возвращают файл побайтово (в том числе TOML без завершающего перевода строки). Исключение: если `mcpServers` пришлось создать, после снятия остаётся пустой `"mcpServers": {}`. Комментарии и пустые строки над заголовком следующей TOML-таблицы не удаляются при снятии и замене блока.
+- Повторный запуск ничего не пишет и не создаёт копию. Запись `widgets-bridge`, у которой `command` (путь сравнивается без учёта регистра) или `args` отличаются, заменяется целиком (`updated`); лишние поля пользователя в записи, совпадающей по `command` и `args`, сохраняются. Чужие записи не затрагиваются; вхождения `widgets-bridge` в значениях и в других ключах игнорируются.
+- Перед правкой существующего файла рядом создаётся копия `<файл>.bak-widgets-bridge-YYYYMMDD` (при повторе в тот же день — суффикс `-2`, `-3`); один раз за запуск. Имя копии не перезаписывает существующий файл (занятое имя пропускается). Копии содержат тот же приватный конфиг клиента (в том числе `env` других MCP-серверов) и сами не удаляются: храните и удаляйте их как сам конфиг.
+- Повреждённый или неоднозначный файл (обрезанный или невалидный JSON, комментарии, повторяющиеся ключи, `mcpServers` не объект, не UTF-8; TOML — незакрытые строки, дубли блока, массив таблиц, определение записи через точечные ключи или inline-таблицу, подтаблица без основной) отклоняется: статус `error`, файл не меняется, копия не создаётся; остальные клиенты обрабатываются. В тексте ошибки содержимое файла не приводится.
+- Запись — временный файл и атомарная замена; непосредственно перед заменой файл сверяется с прочитанным (изменился — перечитать и повторить, затем `error`: клиент мог записать файл параллельно). После записи результат проверяется. Откат к исходному содержимому — только для собственной ошибочной правки (файл побайтово равен тому, что записали мы, но запись не прошла проверку). Если файл после нашей замены уже изменила другая программа, он **не трогается**: если наша запись в нём есть — `registered`/`removed` с пояснением, иначе `error` («not restored», с путём резервной копии).
+- Клиент без конфигурации получает `not_found`, файлы не создаются. Для `codex`, `kimi-code`, `antigravity` достаточно существования каталога клиента: недостающий файл создаётся. Для `claude-code` нужен `.claude.json` (его создаёт сам клиент при первом запуске).
+
+Ограничение: клиенты читают MCP-конфигурацию при старте сессии; уже открытая сессия увидит сервер после перезапуска. Запущенный Claude Code сам периодически переписывает `~\.claude.json` из памяти; защита — сверка непосредственно перед заменой и отказ от отката чужой записи, но полностью исключить гонку нельзя, поэтому клиентов нужно закрыть (см. выше).
 
 ## Диагностика
 
@@ -46,11 +113,11 @@ pwsh telemetry\packaging\Install-Bridge.ps1 -SourceRoot <repo> [-InstallRoot <ab
 pwsh telemetry\packaging\Test-BridgeHealth.ps1 [-InstallRoot <abs>]
 ```
 
-Проверяет владельца и DACL `InstallRoot`, формат идентификаторов в `current.json`, хеши manifest (в manifest входят все файлы версии, в том числе `bridge\node_modules`: изменённый, добавленный или пропавший файл зависимости даёт отказ; не входит только сам `manifest.json`), Node >= 20 и запускает `bridge-cli.cmd --fixture <версия>\fixtures\normal --as-of 2026-01-01T12:00:00Z` (ожидается `mode=fixture`, `schemaVersion=1.0.0`). Вывод — JSON, код 0/1. Код 2 у CLI означает ошибку конфигурации.
+Проверяет владельца и DACL `InstallRoot`, формат идентификаторов в `current.json`, хеши manifest (в manifest входят все файлы версии, в том числе `bridge\node_modules`: изменённый, добавленный или пропавший файл зависимости даёт отказ; не входит только сам `manifest.json`), наличие лаунчеров `widgets-bridge*.cmd` и корректность `discovery.json`, Node >= 20 и запускает `widgets-bridge.cmd [facts --json] --fixture <версия>\fixtures\normal --as-of 2026-01-01T12:00:00Z` (`facts --json` — только если так записано в `discovery.json`; ожидается `mode=fixture`, `schemaVersion=1.0.0`). Вывод — JSON, код 0/1. Код 2 у CLI означает ошибку конфигурации. Установка, сделанная до 12.11.2026 (пилот: без `discovery.json` и лаунчеров `widgets-bridge*.cmd`), даёт FAIL до первого Update — это ожидаемо, сообщение называет исправление.
 
 ## Обновление при активном MCP
 
-`Update-Bridge.ps1 -SourceRoot <новый источник>` (= Install). Новая версия получает новый каталог, предыдущая остаётся как `previous`. Уже запущенные MCP-процессы продолжают читать файлы своей (неизменяемой) версии; новый лаунчер указывает на новую. Чтобы клиент перешёл на новую версию, перезапустите его сессию. Старый каталог остаётся, пока не будет удалён вручную или при Uninstall.
+`Update-Bridge.ps1 -SourceRoot <новый источник>` (= Install). Новая версия получает новый каталог, предыдущая остаётся как `previous`; `discovery.json` переписывается под новую версию (`-RegisterClients` дополнительно перерегистрирует клиентов). Уже запущенные MCP-процессы продолжают читать файлы своей (неизменяемой) версии; новый лаунчер указывает на новую. Чтобы клиент перешёл на новую версию, перезапустите его сессию. Старый каталог остаётся, пока не будет удалён вручную или при Uninstall.
 
 ## Откат
 
@@ -58,15 +125,15 @@ pwsh telemetry\packaging\Test-BridgeHealth.ps1 [-InstallRoot <abs>]
 pwsh telemetry\packaging\Install-Bridge.ps1 -Rollback -InstallRoot <abs>
 ```
 
-Проверяет manifest предыдущей версии и переключает `current`/лаунчеры; `previous` становится прежней текущей.
+Проверяет manifest предыдущей версии и переключает `current`/лаунчеры и переписывает `discovery.json` под возвращённую версию, с возможностями **этой** версии (`capabilities`, `commands.facts`, `api_limits`): откат на версию без `facts` не объявляет `facts --json`. `previous` становится прежней текущей.
 
 ## Удаление и deferred cleanup
 
 ```powershell
-pwsh telemetry\packaging\Uninstall-Bridge.ps1 [-InstallRoot <abs>] [-KeepVersion <id>]
+pwsh telemetry\packaging\Uninstall-Bridge.ps1 [-InstallRoot <abs>] [-KeepVersion <id>] [-KeepRegistration]
 ```
 
-Удаляет лаунчеры, `current.json` и только настоящие версии Bridge: каталоги `versions\<semver>-<12 hex>` с `manifest.json`, чей `id` равен имени. Посторонние каталоги и файлы в `versions\` остаются и перечисляются в отчёте как `foreign`; если в корне нет ни `current.json`, ни лаунчеров, ни настоящей версии, Uninstall ничего не удаляет. Каталог, занятый процессом (IOException / UnauthorizedAccess), не форсируется и не затрагивается через остановку процессов: в отчёте он помечен `deferred`; повторите команду после закрытия клиента. Отказ для корня диска, относительного пути и путей с reparse point.
+Сначала снимает регистрацию `widgets-bridge` в клиентах (только запись, указывающую на лаунчер этой установки; чужие записи и записи другой установки остаются; `-KeepRegistration` отключает этот шаг; ошибка клиента попадает в отчёт, деинсталляцию не останавливает, но результат считается частичным: отчёт получает `partial: true`, код возврата 1, а запись клиента может остаться и указывать на удалённый лаунчер — устраните причину и повторите `Register-Clients.ps1 -Remove`). Затем удаляет лаунчеры (в том числе прежние `bridge-*.cmd`), `discovery.json`, `current.json` и только настоящие версии Bridge: каталоги `versions\<semver>-<12 hex>` с `manifest.json`, чей `id` равен имени. Посторонние каталоги и файлы в `versions\` остаются и перечисляются в отчёте как `foreign`; если в корне нет ни `current.json`, ни лаунчеров, ни настоящей версии, Uninstall ничего не удаляет. Каталог, занятый процессом (IOException / UnauthorizedAccess), не форсируется и не затрагивается через остановку процессов: в отчёте он помечен `deferred`; повторите команду после закрытия клиента. Отказ для корня диска, относительного пути и путей с reparse point.
 
 Важно: Windows не блокирует файлы JS-модулей Node после загрузки. В изолированном тесте автора (receipt жизненного цикла в репозиторий не включён) Uninstall при живом процессе `server.mjs` **удалил** каталог его версии без `deferred`. Защита от этого — не механизм блокировки, а порядок действий: закройте клиенты (Codex, Claude Code, Antigravity) до деинсталляции; `-KeepVersion <id>` оставляет нужную версию. Удаление каталога под работающим процессом не останавливает процесс, но его ленивые импорты и перечитывание схем могут завершиться ошибкой.
 
@@ -78,8 +145,16 @@ pwsh telemetry\packaging\Uninstall-Bridge.ps1 [-InstallRoot <abs>] [-KeepVersion
 pwsh telemetry\packaging\Test-InstallSafety.ps1 -WorkRoot <abs, каталог не должен существовать>
 ```
 
-Изолированный прогон (около минуты; в `%LOCALAPPDATA%` и профили клиентов не пишет, каталог `WorkRoot` удаляется): защищённая DACL нового `InstallRoot`, отказ для каталога с правами «Все», обнаружение изменённого и добавленного файла в `node_modules`, отказ при недопустимых идентификаторах в `current.json`, Uninstall оставляет посторонние каталоги и не трогает чужой корень. Код возврата 0/1.
+Изолированный прогон (около четырёх минут при 55 проверках: семь установок с копированием и хешированием `node_modules`; в `%LOCALAPPDATA%` и профили клиентов не пишет, каталог `WorkRoot` удаляется): защищённая DACL нового `InstallRoot`, отказ для каталога с правами «Все», обнаружение изменённого и добавленного файла в `node_modules`, отказ при недопустимых идентификаторах в `current.json`, Uninstall оставляет посторонние каталоги и не трогает чужой корень; `discovery.json` и лаунчеры `widgets-bridge*.cmd` появляются при установке, переписываются при Update и откате и исчезают при Uninstall; установка без `-RegisterClients` не меняет фиктивные профили клиентов, с флагом регистрирует, Uninstall снимает только свою запись; откат на версию без `facts` убирает `facts --json` и `api_limits` из `discovery.json` (старая версия строится из текущих исходников без подкоманды), а `Test-BridgeHealth` вызывает CLI так, как записано в файле; определение возможностей проверено и на синтетических каталогах версий; Uninstall при ошибке снятия регистрации возвращает 1 и `partial`; Install отклоняет относительный `-ClientsHomeDir` до установки и выводит отчёт при сбое шага регистрации. Код возврата 0/1.
+
+Отдельно `Test-Registration.ps1` (изолированно, секунды; профили клиентов — только фиктивные внутри `WorkRoot`, скрипты вызываются с `-HomeDir`):
+
+```powershell
+pwsh telemetry\packaging\Test-Registration.ps1 -WorkRoot <abs, каталог не должен существовать>
+```
+
+Проверяет движки JSON и TOML (вставка, идемпотентность, побайтовый возврат после снятия, BOM и CRLF, кавычечные ключи, ложные заголовки в строках и комментариях, дубли, повреждённые и неоднозначные конфигурации — отказ без изменений), резервные копии, `-WhatIf`, изоляцию сбоев между клиентами, снятие только своей записи, записи другой установки, `unsupported` и `not_found`, сохранение комментариев над следующей таблицей, сравнение пути лаунчера без учёта регистра, TOML без завершающего перевода строки и дату с пробелом в массиве, уникальность имён резервных копий и поведение при параллельной записи клиента (его запись не затирается откатом; собственная ошибочная правка откатывается). Код возврата 0/1.
 
 ## Резервные копии конфигураций клиентов
 
-`register-codex.ps1` и `register-claude.ps1` копируют существующий `config.toml` / `.claude.json` в `*.bak-<yyyyMMddHHmmss>` перед изменением. Удаление записи клиента при деинсталляции Bridge выполняется вручную (`claude mcp remove`, правка `config.toml`, `agy.exe mcp remove`).
+`Register-Clients.ps1` копирует изменяемый файл в `<файл>.bak-widgets-bridge-YYYYMMDD` (один раз за запуск, только если файл меняется). Ручные помощники `register-codex.ps1` и `register-claude.ps1` копируют `config.toml` / `.claude.json` в `*.bak-<yyyyMMddHHmmss>`. Снятие записи при деинсталляции выполняет `Uninstall-Bridge.ps1` (по умолчанию); вручную — `claude mcp remove`, правка `config.toml`, `agy.exe mcp remove`.

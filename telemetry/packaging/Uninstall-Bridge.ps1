@@ -2,12 +2,19 @@
 .SYNOPSIS Удаляет лаунчеры, current.json и версионные каталоги Bridge.
  Каталог версии, занятый процессом (IOException/UnauthorizedAccess), не форсируется: статус deferred.
  -KeepVersion <id,...>  не удалять указанные версии. Процессы не останавливаются.
+ -KeepRegistration      не снимать регистрацию widgets-bridge в клиентах (по умолчанию снимается запись, указывающая на
+                        лаунчер этой установки; чужие записи и записи другой установки не трогаются; Register-Clients.ps1 -Remove);
+                        при ошибке снятия регистрации остальное удаляется, отчёт получает partial=true, код возврата 1
+ -ClientsHomeDir <abs>  изоляция (тесты): профиль, в котором ищутся клиенты
+ Удаляются также лаунчеры widgets-bridge*.cmd и discovery.json.
  Удаляются только каталоги versions\<semver>-<12 hex> с manifest.json, чей id равен имени; прочее остаётся (foreign).
 #>
 [CmdletBinding()]
 param(
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'DesktopWidgets\bridge'),
-    [string[]]$KeepVersion = @()
+    [string[]]$KeepVersion = @(),
+    [switch]$KeepRegistration,
+    [string]$ClientsHomeDir
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\Common.ps1"
@@ -22,10 +29,23 @@ function Test-BridgeVersionDir($Dir) {
     try { return ((Get-Content -LiteralPath $mf -Raw | ConvertFrom-Json).id -ceq $Dir.Name) } catch { return $false }
 }
 $vrootCheck = Join-Path $root 'versions'
-$hasMarker = (Test-Path -LiteralPath (Join-Path $root 'current.json')) -or (Test-Path -LiteralPath (Join-Path $root 'bridge-cli.cmd')) -or (Test-Path -LiteralPath (Join-Path $root 'bridge-server.cmd'))
+$hasMarker = (Test-Path -LiteralPath (Join-Path $root 'current.json')) -or (Test-Path -LiteralPath (Join-Path $root 'bridge-cli.cmd')) -or (Test-Path -LiteralPath (Join-Path $root 'bridge-server.cmd')) -or (Test-Path -LiteralPath (Join-Path $root 'widgets-bridge.cmd')) -or (Test-Path -LiteralPath (Join-Path $root 'widgets-bridge-server.cmd')) -or (Test-Path -LiteralPath (Join-Path $root 'discovery.json'))
 $hasVersion = (Test-Path -LiteralPath $vrootCheck) -and [bool](Get-ChildItem -LiteralPath $vrootCheck -Directory -Force | Where-Object { Test-BridgeVersionDir $_ } | Select-Object -First 1)
 if (-not $hasMarker -and -not $hasVersion) { Write-Output ([ordered]@{ removed = @(); deferred = @(); kept = @(); foreign = @(); note = 'not a Bridge install root; nothing removed' } | ConvertTo-Json -Compress); return }
-foreach ($f in 'bridge-server.cmd', 'bridge-cli.cmd', 'current.json') {
+# Сначала снимается регистрация в клиентах (пока лаунчер ещё на месте и по нему отличается своя запись от чужой).
+$registration = $null
+$registrationWarnings = @()
+if (-not $KeepRegistration) {
+    try {
+        $regArgs = @{ InstallRoot = $root; Remove = $true }
+        if ($ClientsHomeDir) { $regArgs.HomeDir = $ClientsHomeDir }
+        $regOut = & "$PSScriptRoot\Register-Clients.ps1" @regArgs | Out-String
+        $regParsed = $regOut | ConvertFrom-Json
+        $registration = @($regParsed.clients)
+        $registrationWarnings = @($regParsed.warnings)
+    } catch { $registration = @([ordered]@{ client = '*'; status = 'error'; detail = $_.Exception.Message }) }
+}
+foreach ($f in 'bridge-server.cmd', 'bridge-cli.cmd', 'widgets-bridge-server.cmd', 'widgets-bridge.cmd', 'discovery.json', 'current.json') {
     $p = Join-Path $root $f
     if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force; $removed += $f }
 }
@@ -54,4 +74,14 @@ if (-not $deferred -and -not $kept) {
     if ((Test-Path -LiteralPath $vroot) -and -not (Get-ChildItem -LiteralPath $vroot -Force)) { Remove-Item -LiteralPath $vroot -Force }
     if (-not (Get-ChildItem -LiteralPath $root -Force)) { Remove-Item -LiteralPath $root -Force; $removed += '<InstallRoot>' }
 }
-Write-Output ([ordered]@{ removed = $removed; deferred = $deferred; kept = $kept; foreign = $foreign } | ConvertTo-Json -Compress -Depth 4)
+$result = [ordered]@{ removed = $removed; deferred = $deferred; kept = $kept; foreign = $foreign }
+# Ошибка снятия регистрации деинсталляцию не останавливает, но результат частичный: код возврата 1 и partial=true
+# (запись клиента может остаться и указывать на удалённый лаунчер; повторите Register-Clients.ps1 -Remove после исправления).
+$exitCode = 0
+if ($null -ne $registration) {
+    $result.registration = $registration
+    if (@($registrationWarnings).Count -gt 0) { $result.registration_warnings = @($registrationWarnings) }
+    if (@($registration | Where-Object { $_.status -eq 'error' }).Count -gt 0) { $result.partial = $true; $exitCode = 1 }
+}
+Write-Output ($result | ConvertTo-Json -Compress -Depth 6)
+exit $exitCode

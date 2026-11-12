@@ -1,7 +1,7 @@
 # Фрагмент для <CODEX_HOME>\config.toml. Замените <InstallRoot> на путь установки Bridge
 # (по умолчанию %LOCALAPPDATA%\DesktopWidgets\bridge).
-[mcp_servers.ai_telemetry_bridge]
-command = "<InstallRoot>\\bridge-server.cmd"
+[mcp_servers.widgets-bridge]
+command = "<InstallRoot>\\widgets-bridge-server.cmd"
 args = []
 startup_timeout_sec = 20
 tool_timeout_sec = 30

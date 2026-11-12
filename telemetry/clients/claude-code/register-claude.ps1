@@ -13,8 +13,8 @@ param(
     [switch]$PrintOnly
 )
 $ErrorActionPreference = 'Stop'
-$json = [ordered]@{ type = 'stdio'; command = (Join-Path $InstallRoot 'bridge-server.cmd'); args = @() } | ConvertTo-Json -Compress
-if ($PrintOnly) { Write-Output "claude mcp add-json --scope user ai_telemetry_bridge '$json'"; return }
+$json = [ordered]@{ type = 'stdio'; command = (Join-Path $InstallRoot 'widgets-bridge-server.cmd'); args = @() } | ConvertTo-Json -Compress
+if ($PrintOnly) { Write-Output "claude mcp add-json --scope user widgets-bridge '$json'"; return }
 if (-not $ClaudeConfigDir -and -not $ConfirmRealHome) { throw 'Specify -ClaudeConfigDir <abs-dir> (or -ConfirmRealHome for the real profile, or -PrintOnly).' }
 $old = $env:CLAUDE_CONFIG_DIR
 try {
@@ -27,6 +27,6 @@ try {
     $cfg = Join-Path $cfgDir '.claude.json'
     if (Test-Path -LiteralPath $cfg) { Copy-Item -LiteralPath $cfg -Destination "$cfg.bak-$(Get-Date -Format yyyyMMddHHmmss)" }
     $escapedJson = $json -replace '"', '\"'
-    & claude mcp add-json --scope user ai_telemetry_bridge $escapedJson
+    & claude mcp add-json --scope user widgets-bridge $escapedJson
     if ($LASTEXITCODE -ne 0) { throw "claude mcp add-json failed: exit $LASTEXITCODE" }
 } finally { $env:CLAUDE_CONFIG_DIR = $old }

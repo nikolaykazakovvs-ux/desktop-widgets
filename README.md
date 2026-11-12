@@ -89,6 +89,10 @@ Settings, snapshots and journals stay beside the applications. AI Limits 1.1.0 a
 
 The project page is static HTML, without analytics, account queries or external fonts. It uses actual WPF exports: real system readings for resources and controlled demo data for network history and limits.
 
+## Widgets Bridge
+
+The widgets publish private local snapshots in `%LOCALAPPDATA%\DesktopWidgets\telemetry` (contract 1.0.0; the optional `api_limits` extension is described in the contract documents). **Widgets Bridge** (`widgets-bridge`, source in `telemetry/`) reads these snapshots, checks the contract and freshness, and gives verified facts to AI agents through the command line (`widgets-bridge facts --json`) or MCP (Model Context Protocol). It only reads published snapshots: it does not query providers or the system and does not choose executors. It is installed from `telemetry/packaging` (`Install-Bridge.ps1`; the optional `-RegisterClients` flag adds the MCP server to detected clients: Claude Code, Codex, Kimi Code, Antigravity); see the [installation guide](docs/ai-telemetry-installation.md). It is not part of the prebuilt releases yet; installation has been verified in an isolated directory only.
+
 ## Developers
 
 Sources: windows/resources-widget and windows/limits-widget. docs is a standalone GitHub Pages site, without a build step. Builds require Windows PowerShell and the .NET Framework 4.8 compiler; no separate .NET SDK is required.

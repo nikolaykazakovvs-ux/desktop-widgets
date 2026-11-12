@@ -10,9 +10,9 @@ param(
     [switch]$ConfirmRealHome
 )
 $ErrorActionPreference = 'Stop'
-$cmd = (Join-Path $InstallRoot 'bridge-server.cmd').Replace('\', '\\')
+$cmd = (Join-Path $InstallRoot 'widgets-bridge-server.cmd').Replace('\', '\\')
 $snippet = @"
-[mcp_servers.ai_telemetry_bridge]
+[mcp_servers.widgets-bridge]
 command = "$cmd"
 args = []
 startup_timeout_sec = 20
@@ -27,7 +27,7 @@ $cfg = Join-Path $CodexHome 'config.toml'
 $text = ''
 if (Test-Path -LiteralPath $cfg) {
     $text = Get-Content -LiteralPath $cfg -Raw
-    if ($text -match '(?m)^\[mcp_servers\.ai_telemetry_bridge\]') { Write-Output 'already registered; nothing changed'; return }
+    if ($text -match '(?m)^\[mcp_servers\.widgets-bridge\]') { Write-Output 'already registered; nothing changed'; return }
     Copy-Item -LiteralPath $cfg -Destination "$cfg.bak-$(Get-Date -Format yyyyMMddHHmmss)"
 }
 $sep = if ($text -and -not $text.EndsWith("`n")) { "`r`n" } else { '' }
