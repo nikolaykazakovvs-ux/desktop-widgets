@@ -345,19 +345,26 @@
       ]
     },
     "api_limits": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "status": {
-          "const": "not_available"
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "const": "not_available"
+            },
+            "reason": {
+              "const": "monitor_not_implemented"
+            }
+          },
+          "required": [
+            "status",
+            "reason"
+          ]
         },
-        "reason": {
-          "const": "monitor_not_implemented"
+        {
+          "$ref": "extensions/api-limits-v1.1.schema.json#/$defs/bridge_api_limits"
         }
-      },
-      "required": [
-        "status",
-        "reason"
       ]
     },
     "orchestration_hints": {

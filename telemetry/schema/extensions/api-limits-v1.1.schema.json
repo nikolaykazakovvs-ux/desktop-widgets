@@ -1,0 +1,950 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.desktop-widgets.invalid/telemetry/1.0.0/extensions/api-limits-v1.1.schema.json",
+  "title": "api-balances-snapshot (producer file) and Bridge api_limits node, extension api-limits/1.1",
+  "description": "Contract for API balances telemetry between Desktop Widgets (api-widget producer), AI Telemetry Bridge (reader) and S.I.G.M.A. (consumer adapter). Enforces non-negative exact decimal string amounts without whitespace/newlines, scale/minor_units cross-check, shared_pool_id deduplication without summation, per-connection key_allowance preservation, strict currency/credit separation, and secret-free masked 1Password references.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "enum": [
+        "1.1.0",
+        "1.0.0",
+        "1.1.0-draft",
+        "1.0.0-draft"
+      ]
+    },
+    "kind": {
+      "const": "api-balances-snapshot"
+    },
+    "source_id": {
+      "const": "api-widget"
+    },
+    "mode": {
+      "enum": [
+        "fixture",
+        "live"
+      ]
+    },
+    "measured_at": {
+      "$ref": "#/$defs/timestamp_or_null"
+    },
+    "published_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "last_attempt_at": {
+      "$ref": "#/$defs/timestamp_or_null"
+    },
+    "status": {
+      "$ref": "#/$defs/snapshot_status"
+    },
+    "reason": {
+      "$ref": "#/$defs/error_code"
+    },
+    "poll_interval_ms": {
+      "type": "integer",
+      "minimum": 60000,
+      "maximum": 86400000
+    },
+    "heartbeat_interval_ms": {
+      "const": 10000
+    },
+    "pools": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/producer_pool"
+      }
+    },
+    "connections": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/producer_connection"
+      }
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "$ref": "#/$defs/producer_entry"
+      }
+    },
+    "providers": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/provider_summary"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "source_id",
+    "mode",
+    "measured_at",
+    "published_at",
+    "last_attempt_at",
+    "status",
+    "reason",
+    "poll_interval_ms",
+    "heartbeat_interval_ms",
+    "pools",
+    "connections",
+    "entries",
+    "providers"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "measured_at": {
+            "$ref": "#/$defs/timestamp"
+          },
+          "reason": {
+            "const": "none"
+          },
+          "pools": {
+            "minItems": 1
+          },
+          "connections": {
+            "minItems": 1
+          },
+          "entries": {
+            "minItems": 1
+          },
+          "providers": {
+            "minItems": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "reason": {
+            "not": {
+              "const": "none"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?![\\s\\S]*\\s)\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "timestamp_or_null": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provider_id": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)[a-z][a-z0-9_.-]{0,63}$"
+    },
+    "account_id": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)acc_[a-z0-9]{16,64}$",
+      "description": "Opaque stable hash/slug; never email, name, org title or key fragment."
+    },
+    "connection_id": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)conn_[a-z0-9_]{8,64}$"
+    },
+    "shared_pool_id": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)pool_[a-z0-9_]{16,64}$",
+      "description": "One provider-side balance. Keys of one account/org/project sharing a balance share this id."
+    },
+    "masked_1password_ref": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)1p_masked:[a-z0-9_.-]{1,64}/[a-z0-9_.-]{1,64}/\\*{3,16}$",
+      "description": "Sanitized, non-secret reference to 1Password item slot without raw op:// URI, vault UUID, org/user PII or secret material."
+    },
+    "masked_1password_ref_or_null": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/masked_1password_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "credit_unit": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)[a-z][a-z0-9_.-]{0,63}$"
+    },
+    "currency": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?![\\s\\S]*\\s)[A-Z]{3}$"
+        },
+        {
+          "const": "credits"
+        }
+      ]
+    },
+    "decimal_amount": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)-?(0|[1-9][0-9]{0,17})(\\.[0-9]{1,9})?$"
+    },
+    "metric_kind": {
+      "enum": [
+        "account_balance",
+        "period_spend",
+        "key_allowance",
+        "plan_credits"
+      ],
+      "description": "period_spend, key_allowance and plan_credits are never relabelled as account_balance."
+    },
+    "value_origin": {
+      "enum": [
+        "measured",
+        "calculated",
+        "estimated"
+      ]
+    },
+    "snapshot_status": {
+      "enum": [
+        "ok",
+        "partial",
+        "unavailable",
+        "unknown",
+        "error"
+      ]
+    },
+    "entry_status": {
+      "enum": [
+        "ok",
+        "unknown",
+        "unavailable",
+        "error",
+        "not_supported"
+      ]
+    },
+    "degradation_status": {
+      "enum": [
+        "none",
+        "stale_after_error",
+        "stale_cached",
+        "credentials_unconfigured",
+        "corrupt_payload"
+      ]
+    },
+    "error_code": {
+      "enum": [
+        "none",
+        "not_configured",
+        "credentials_unconfigured",
+        "auth_failed",
+        "insufficient_permission",
+        "not_eligible",
+        "rate_limited",
+        "provider_unavailable",
+        "network_unreachable",
+        "timeout",
+        "invalid_response",
+        "unsupported_currency",
+        "clock_invalid",
+        "source_unavailable",
+        "source_stale",
+        "source_partial",
+        "publisher_silent",
+        "invalid_input",
+        "access_denied",
+        "transient_io_error",
+        "conflicting_shared_pool_balance",
+        "stale_after_error",
+        "corrupt_snapshot_nul_bytes",
+        "invalid_json",
+        "internal_error"
+      ],
+      "description": "Closed set. Raw provider text, URLs, headers and bodies are never carried."
+    },
+    "freshness": {
+      "enum": [
+        "fresh",
+        "stale",
+        "unknown"
+      ]
+    },
+    "liveness": {
+      "enum": [
+        "alive",
+        "silent",
+        "unknown"
+      ]
+    },
+    "rate_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rpm_limit": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rpm_remaining": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tpm_limit": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tpm_remaining": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "rpm_limit",
+        "rpm_remaining",
+        "tpm_limit",
+        "tpm_remaining"
+      ]
+    },
+    "producer_pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shared_pool_id": {
+          "$ref": "#/$defs/shared_pool_id"
+        },
+        "provider_id": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "account_id": {
+          "$ref": "#/$defs/account_id"
+        }
+      },
+      "required": [
+        "shared_pool_id",
+        "provider_id",
+        "account_id"
+      ]
+    },
+    "producer_connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "$ref": "#/$defs/connection_id"
+        },
+        "shared_pool_id": {
+          "$ref": "#/$defs/shared_pool_id"
+        },
+        "provider_id": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "1password_ref_masked": {
+          "$ref": "#/$defs/masked_1password_ref_or_null"
+        },
+        "rate_limits": {
+          "$ref": "#/$defs/rate_limits"
+        },
+        "status": {
+          "$ref": "#/$defs/entry_status"
+        },
+        "reason": {
+          "$ref": "#/$defs/error_code"
+        },
+        "http_status": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "degradation_status": {
+          "$ref": "#/$defs/degradation_status"
+        }
+      },
+      "required": [
+        "connection_id",
+        "shared_pool_id",
+        "provider_id"
+      ]
+    },
+    "producer_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/connection_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null: pool-level entry (not tied to one key). Non-null: the connection must belong to shared_pool_id of the entry."
+        },
+        "shared_pool_id": {
+          "$ref": "#/$defs/shared_pool_id"
+        },
+        "metric_kind": {
+          "$ref": "#/$defs/metric_kind"
+        },
+        "currency": {
+          "$ref": "#/$defs/currency"
+        },
+        "credit_unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/credit_unit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal_amount"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minor_units": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value_origin": {
+          "$ref": "#/$defs/value_origin"
+        },
+        "status": {
+          "$ref": "#/$defs/entry_status"
+        },
+        "reason": {
+          "$ref": "#/$defs/error_code"
+        },
+        "measured_at": {
+          "$ref": "#/$defs/timestamp_or_null"
+        },
+        "last_attempt_at": {
+          "$ref": "#/$defs/timestamp_or_null"
+        },
+        "degradation_status": {
+          "$ref": "#/$defs/degradation_status"
+        }
+      },
+      "required": [
+        "connection_id",
+        "shared_pool_id",
+        "metric_kind",
+        "currency",
+        "credit_unit",
+        "amount",
+        "scale",
+        "minor_units",
+        "value_origin",
+        "status",
+        "reason",
+        "measured_at",
+        "last_attempt_at"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "currency": {
+                "const": "credits"
+              }
+            },
+            "required": [
+              "currency"
+            ]
+          },
+          "then": {
+            "properties": {
+              "credit_unit": {
+                "$ref": "#/$defs/credit_unit"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "credit_unit": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/decimal_amount"
+              },
+              "scale": {
+                "type": "integer"
+              },
+              "minor_units": {
+                "type": "integer"
+              },
+              "measured_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "reason": {
+                "const": "none"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "amount": {
+                "type": "null"
+              },
+              "scale": {
+                "type": "null"
+              },
+              "minor_units": {
+                "type": "null"
+              },
+              "reason": {
+                "not": {
+                  "const": "none"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_kind": {
+                "enum": [
+                  "period_spend",
+                  "key_allowance"
+                ]
+              },
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "metric_kind",
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/decimal_amount_non_negative"
+              },
+              "minor_units": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "provider_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider_id": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "account_id": {
+          "$ref": "#/$defs/account_id"
+        },
+        "shared_pool_id": {
+          "$ref": "#/$defs/shared_pool_id"
+        },
+        "status": {
+          "$ref": "#/$defs/snapshot_status"
+        },
+        "reason": {
+          "$ref": "#/$defs/error_code"
+        },
+        "degradation_status": {
+          "$ref": "#/$defs/degradation_status"
+        },
+        "measured_at": {
+          "$ref": "#/$defs/timestamp_or_null"
+        },
+        "last_attempt_at": {
+          "$ref": "#/$defs/timestamp_or_null"
+        },
+        "age_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "1password_ref_masked": {
+          "$ref": "#/$defs/masked_1password_ref_or_null"
+        },
+        "rate_limits": {
+          "$ref": "#/$defs/rate_limits"
+        },
+        "currencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/currency"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "provider_id",
+        "account_id",
+        "shared_pool_id",
+        "status",
+        "reason",
+        "degradation_status",
+        "measured_at",
+        "last_attempt_at",
+        "age_ms",
+        "1password_ref_masked",
+        "rate_limits",
+        "currencies"
+      ]
+    },
+    "bridge_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/connection_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metric_kind": {
+          "$ref": "#/$defs/metric_kind"
+        },
+        "currency": {
+          "$ref": "#/$defs/currency"
+        },
+        "credit_unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/credit_unit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal_amount"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minor_units": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value_origin": {
+          "$ref": "#/$defs/value_origin"
+        },
+        "status": {
+          "$ref": "#/$defs/entry_status"
+        },
+        "reason": {
+          "$ref": "#/$defs/error_code"
+        },
+        "measured_at": {
+          "$ref": "#/$defs/timestamp_or_null"
+        },
+        "last_attempt_at": {
+          "$ref": "#/$defs/timestamp_or_null"
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshness"
+        },
+        "liveness": {
+          "$ref": "#/$defs/liveness"
+        },
+        "age_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "degradation_status": {
+          "$ref": "#/$defs/degradation_status"
+        }
+      },
+      "required": [
+        "metric_kind",
+        "currency",
+        "credit_unit",
+        "amount",
+        "scale",
+        "minor_units",
+        "value_origin",
+        "status",
+        "reason",
+        "measured_at",
+        "last_attempt_at",
+        "freshness",
+        "liveness",
+        "age_ms"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "metric_kind": {
+                "enum": [
+                  "period_spend",
+                  "key_allowance"
+                ]
+              },
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "metric_kind",
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/decimal_amount_non_negative"
+              },
+              "minor_units": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "bridge_pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shared_pool_id": {
+          "$ref": "#/$defs/shared_pool_id"
+        },
+        "provider_id": {
+          "$ref": "#/$defs/provider_id"
+        },
+        "account_id": {
+          "$ref": "#/$defs/account_id"
+        },
+        "connection_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/connection_id"
+          }
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bridge_entry"
+          }
+        }
+      },
+      "required": [
+        "shared_pool_id",
+        "provider_id",
+        "account_id",
+        "connection_ids",
+        "entries"
+      ]
+    },
+    "bridge_api_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_extension": {
+          "enum": [
+            "api-limits/1.1.0",
+            "api-limits/1.0.0",
+            "api-limits/1.1.0-draft",
+            "api-limits/1.0.0-draft"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/snapshot_status"
+        },
+        "reason": {
+          "$ref": "#/$defs/error_code"
+        },
+        "read_status": {
+          "enum": [
+            "ok",
+            "missing",
+            "invalid_input",
+            "clock_invalid",
+            "transient_io_error",
+            "access_denied",
+            "unavailable",
+            "error"
+          ]
+        },
+        "liveness": {
+          "$ref": "#/$defs/liveness"
+        },
+        "freshness": {
+          "$ref": "#/$defs/freshness"
+        },
+        "pools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bridge_pool"
+          }
+        }
+      },
+      "required": [
+        "schema_extension",
+        "status",
+        "reason",
+        "read_status",
+        "liveness",
+        "freshness",
+        "pools"
+      ]
+    },
+    "decimal_amount_non_negative": {
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*\\s)(0|[1-9][0-9]{0,17})(\\.[0-9]{1,9})?$"
+    }
+  }
+}

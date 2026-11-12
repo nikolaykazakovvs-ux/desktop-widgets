@@ -24,3 +24,6 @@ _checks/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# Local test, probe and review artifacts of telemetry/bridge and telemetry/publisher-tests
+/.work/

@@ -5,11 +5,13 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from urllib.parse import urljoin
 
 from contract import (METRICS, SCHEMAS, REGISTRY, assessment, derive_output, instant,
                       load_document, validate_document)
 from generate_fixtures import AS_OF, FIXTURES, GIB, normal, scenarios
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 
 class ContractTests(unittest.TestCase):
@@ -28,7 +30,9 @@ class ContractTests(unittest.TestCase):
         return derive_output(self.hardware, self.quotas, AS_OF)
 
     def test_all_schemas_have_supported_dialect_and_validate(self):
-        self.assertEqual(len(SCHEMAS), 4)
+        self.assertEqual(set(SCHEMAS), {"common.schema.json", "hardware-snapshot.schema.json", "quotas-snapshot.schema.json",
+                                        "bridge-output.schema.json", "api-limits-v1.1.schema.json"})
+        self.assertEqual(len(SCHEMAS), 5)
         for schema in SCHEMAS.values():
             Draft202012Validator.check_schema(schema)
             self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
@@ -366,6 +370,170 @@ class ContractTests(unittest.TestCase):
                 path.write_text(content, encoding="utf-8")
                 with self.assertRaises(ValueError):
                     load_document(path)
+
+
+EXTENSION = "api-limits-v1.1.schema.json"
+POOL = "pool_0123456789abcdef0123"
+ACCOUNT = "acc_0123456789abcdef0123"
+CONNECTION = "conn_0123456789abcdef"
+T0 = "2026-01-01T11:59:00Z"
+ATTEMPT = "2026-01-01T11:59:50Z"
+NO_RATE_LIMITS = {"rpm_limit": None, "rpm_remaining": None, "tpm_limit": None, "tpm_remaining": None}
+
+
+def producer_entry(**changes):
+    entry = {"connection_id": CONNECTION, "shared_pool_id": POOL, "metric_kind": "account_balance", "currency": "USD",
+             "credit_unit": None, "amount": "25.50", "scale": 2, "minor_units": 2550, "value_origin": "measured",
+             "status": "ok", "reason": "none", "measured_at": T0, "last_attempt_at": ATTEMPT}
+    entry.update(changes)
+    return entry
+
+
+def producer_snapshot(**changes):
+    snapshot = {"schemaVersion": "1.1.0", "kind": "api-balances-snapshot", "source_id": "api-widget", "mode": "fixture",
+                "measured_at": T0, "published_at": ATTEMPT, "last_attempt_at": ATTEMPT, "status": "ok", "reason": "none",
+                "poll_interval_ms": 60000, "heartbeat_interval_ms": 10000,
+                "pools": [{"shared_pool_id": POOL, "provider_id": "deepseek", "account_id": ACCOUNT}],
+                "connections": [{"connection_id": CONNECTION, "shared_pool_id": POOL, "provider_id": "deepseek",
+                                 "1password_ref_masked": None, "rate_limits": dict(NO_RATE_LIMITS), "status": "ok",
+                                 "reason": "none", "http_status": None}],
+                "entries": [producer_entry()],
+                "providers": [{"provider_id": "deepseek", "account_id": ACCOUNT, "shared_pool_id": POOL, "status": "ok",
+                               "reason": "none", "degradation_status": "none", "measured_at": T0, "last_attempt_at": ATTEMPT,
+                               "age_ms": 60000, "1password_ref_masked": None, "rate_limits": dict(NO_RATE_LIMITS),
+                               "currencies": ["USD"]}]}
+    snapshot.update(changes)
+    return snapshot
+
+
+def bridge_node(**changes):
+    node = {"schema_extension": "api-limits/1.1.0", "status": "ok", "reason": "none", "read_status": "ok",
+            "liveness": "alive", "freshness": "fresh",
+            "pools": [{"shared_pool_id": POOL, "provider_id": "deepseek", "account_id": ACCOUNT,
+                       "connection_ids": [CONNECTION],
+                       "entries": [{"connection_id": CONNECTION, "metric_kind": "account_balance", "currency": "USD",
+                                    "credit_unit": None, "amount": "25.50", "scale": 2, "minor_units": 2550,
+                                    "value_origin": "measured", "status": "ok", "reason": "none", "measured_at": T0,
+                                    "last_attempt_at": ATTEMPT, "freshness": "fresh", "liveness": "alive", "age_ms": 60000}]}]}
+    node.update(changes)
+    return node
+
+
+def schema_refs(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "$ref":
+                yield item
+            else:
+                yield from schema_refs(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from schema_refs(item)
+
+
+class ApiLimitsExtensionTests(unittest.TestCase):
+    """The api_limits extension is validated through a plain registry keyed by `$id`, like any other schema."""
+
+    @staticmethod
+    def plain_registry():
+        registry = Registry()
+        for schema in SCHEMAS.values():
+            registry = registry.with_resource(schema["$id"], Resource.from_contents(schema))
+        return registry
+
+    def validator(self, name, fragment=""):
+        registry = self.plain_registry()
+        schema = SCHEMAS[name] if not fragment else {"$ref": SCHEMAS[name]["$id"] + fragment}
+        return Draft202012Validator(schema, registry=registry, format_checker=FormatChecker())
+
+    def errors(self, name, document, fragment=""):
+        return list(self.validator(name, fragment).iter_errors(document))
+
+    def output_with(self, api_limits):
+        hardware, quotas = normal()
+        output = derive_output(hardware, quotas, AS_OF)
+        output["api_limits"] = api_limits
+        return output
+
+    def test_every_reference_resolves_through_the_id_registry(self):
+        registry = self.plain_registry()
+        checked = 0
+        for name, schema in SCHEMAS.items():
+            resolver = registry.resolver(base_uri=schema["$id"])
+            for ref in schema_refs(schema):
+                with self.subTest(schema=name, ref=ref):
+                    self.assertIsNotNone(resolver.lookup(ref).contents)
+                checked += 1
+        self.assertGreater(checked, 20)
+
+    def test_extension_id_is_the_target_of_the_reference_in_bridge_output(self):
+        bridge = SCHEMAS["bridge-output.schema.json"]
+        self.assertEqual(SCHEMAS[EXTENSION]["$id"], urljoin(bridge["$id"], "extensions/api-limits-v1.1.schema.json"))
+        self.assertIn("extensions/api-limits-v1.1.schema.json#/$defs/bridge_api_limits", set(schema_refs(bridge)))
+
+    def test_bridge_output_with_extension_node_validates_through_plain_registry(self):
+        output = self.output_with(bridge_node())
+        self.assertEqual(self.errors("bridge-output.schema.json", output), [])
+        validate_document("bridge-output", output, instant(AS_OF))
+        # the reserve form still works and does not need the extension
+        reserve = {"status": "not_available", "reason": "monitor_not_implemented"}
+        self.assertEqual(self.errors("bridge-output.schema.json", self.output_with(reserve)), [])
+
+    def test_bridge_output_rejects_invalid_nodes_without_resolution_errors(self):
+        broken = {
+            "wrong reserve reason": {"status": "not_available", "reason": "source_stale"},
+            "extra field": {**bridge_node(), "total": "1.00"},
+            "unknown read_status": bridge_node(read_status="not_a_status"),
+            "pool without connections": bridge_node(pools=[{**bridge_node()["pools"][0], "connection_ids": []}]),
+        }
+        entry_changes = {"amount as number": {"amount": 25.5}, "amount with space": {"amount": "25 .50"},
+                         "negative key_allowance": {"metric_kind": "key_allowance", "amount": "-1.00", "minor_units": -100}}
+        for label, changes in entry_changes.items():
+            node = bridge_node()
+            node["pools"][0]["entries"][0].update(changes)
+            broken[label] = node
+        for label, node in broken.items():
+            with self.subTest(label):
+                output = self.output_with(node)
+                self.assertNotEqual(self.errors("bridge-output.schema.json", output), [])
+                with self.assertRaises(ValueError):
+                    validate_document("bridge-output", output, instant(AS_OF))
+
+    def test_oracle_checks_clocks_of_the_extension_node(self):
+        output = self.output_with(bridge_node())
+        output["api_limits"]["pools"][0]["entries"][0]["measured_at"] = "2026-01-01T12:00:01Z"  # after generated_at
+        with self.assertRaises(ValueError):
+            validate_document("bridge-output", output, instant(AS_OF))
+
+    def test_producer_snapshot_valid_forms(self):
+        self.assertEqual(self.errors(EXTENSION, producer_snapshot()), [])
+        self.assertEqual(self.errors(EXTENSION, producer_snapshot(entries=[producer_entry(connection_id=None)])), [], "pool-level entry")
+        credits = producer_entry(currency="credits", credit_unit="tokens", amount="5", scale=0, minor_units=5)
+        self.assertEqual(self.errors(EXTENSION, producer_snapshot(entries=[credits])), [])
+        overdraft = producer_entry(amount="-1.00", minor_units=-100)
+        self.assertEqual(self.errors(EXTENSION, producer_snapshot(entries=[overdraft])), [], "account_balance may be negative")
+
+    def test_producer_snapshot_negative_cases(self):
+        cases = {
+            "float amount instead of string": producer_snapshot(entries=[producer_entry(amount=25.5)]),
+            "credits without credit_unit": producer_snapshot(entries=[producer_entry(currency="credits", credit_unit=None)]),
+            "fiat currency with credit_unit": producer_snapshot(entries=[producer_entry(credit_unit="tokens")]),
+            "negative period_spend": producer_snapshot(entries=[producer_entry(metric_kind="period_spend", amount="-1.00", minor_units=-100)]),
+            "negative key_allowance": producer_snapshot(entries=[producer_entry(metric_kind="key_allowance", amount="-1.00", minor_units=-100)]),
+            "amount with whitespace": producer_snapshot(entries=[producer_entry(amount="25.50 ")]),
+            "amount with newline": producer_snapshot(entries=[producer_entry(amount="25.50\n")]),
+            "ok entry without amount": producer_snapshot(entries=[producer_entry(amount=None, scale=None, minor_units=None)]),
+            "non-ok entry with amount": producer_snapshot(entries=[producer_entry(status="error", reason="timeout")]),
+            "non-ok entry without reason": producer_snapshot(entries=[producer_entry(status="error", reason="none", amount=None, scale=None, minor_units=None)]),
+            "extra top-level field": {**producer_snapshot(), "total": "1.00"},
+            "ok snapshot without pools": producer_snapshot(pools=[]),
+            "heartbeat other than 10000": producer_snapshot(heartbeat_interval_ms=5000),
+            "poll below minimum": producer_snapshot(poll_interval_ms=1000),
+            "raw url as pool id": producer_snapshot(pools=[{"shared_pool_id": "https://api.example.com", "provider_id": "deepseek", "account_id": ACCOUNT}]),
+        }
+        for label, document in cases.items():
+            with self.subTest(label):
+                self.assertNotEqual(self.errors(EXTENSION, document), [])
 
 
 if __name__ == "__main__":

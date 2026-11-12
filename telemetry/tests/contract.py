@@ -16,7 +16,7 @@ from referencing import Registry, Resource
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = {}
 REGISTRY = Registry()
-for _path in (ROOT / "schema").glob("*.schema.json"):
+for _path in (ROOT / "schema").rglob("*.schema.json"):
     _schema = json.loads(_path.read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(_schema)
     SCHEMAS[_path.name] = _schema
@@ -322,6 +322,10 @@ def validate_document(kind, document, as_of=None):
         validate_quotas(document)
     else:
         expected = derive_output(document["hardware_state"]["source"], document["subscription_quotas"]["source"], document["generated_at"], document["mode"], document["hardware_state"]["read_status"], document["subscription_quotas"]["read_status"])
+        if document["api_limits"].get("status") != "not_available":
+            # Extension form (api-limits/1.x): validated here by schema and clocks only; the oracle does not
+            # derive it. The Bridge (telemetry/bridge/core.mjs) additionally checks the node's internal invariants.
+            expected["api_limits"] = document["api_limits"]
         fail(document != expected, "derived fields differ from policy")
     return document
 
