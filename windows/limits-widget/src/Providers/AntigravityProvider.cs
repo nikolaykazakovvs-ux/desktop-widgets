@@ -22,12 +22,12 @@ namespace LimitsWidget
                 if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                 string exe = Cli.Resolve(ctx.Svc.Command, "agy");
                 if (exe == null)
-                    return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "agy (Antigravity CLI) не найден в PATH", Placeholders());
+                    return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "Antigravity CLI не найден — установите его или укажите путь в config.json.", Placeholders());
                 // Лимит в 1 процесс: agy отвечает на /usage сам, а фоновый апдейтер (вспышка окна терминала
                 // от `agy --version`) и MCP-серверы через npx запуститься не могут.
                 var r = Cli.Run(exe, "-p \"/usage\" --output-format json", ctx.Svc.TimeoutSeconds * 1000, ctx.Svc.MaxProcesses);
                 if (!r.Ok)
-                    return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "agy /usage: " + r.Describe(), Placeholders());
+                    return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "agy /usage: " + r.Describe(), Placeholders());
                 text = r.StdOut;
             }
 
@@ -74,7 +74,7 @@ namespace LimitsWidget
             if (snap.Bars.Count == 0)
             {
                 string hint = Cli.FirstLine(Json.Str(Json.Get(root, "response")) ?? text);
-                return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка",
+                return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка",
                     "agy /usage не вернул квот" + (hint != null ? ": " + hint : ""), Placeholders());
             }
             // время квот — завершение запроса квот; кредиты догружаются отдельно и время квот не сдвигают

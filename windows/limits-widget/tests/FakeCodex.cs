@@ -4,6 +4,8 @@ using System.Threading;
 
 // Поддельный `codex app-server` для офлайн-тестов: JSON-RPC построчно по stdio, без сети и аккаунтов.
 // FAKE_CODEX_USAGE: ok | error | hang | slow | nulls | absent. FAKE_CODEX_LOG — файл, куда пишутся полученные запросы.
+// FAKE_CODEX_LIMITS=neterror — запрос лимитов заканчивается ошибкой сети, как у настоящего codex без интернета
+// (английская ошибка с адресом и параметром-секретом, плюс строка ERROR в stderr).
 static class FakeCodex
 {
     static int Main(string[] args)
@@ -18,6 +20,13 @@ static class FakeCodex
             string id = Id(line);
             if (line.Contains("\"method\":\"initialize\""))
                 Reply(id, "{\"userAgent\":\"fake\"}");
+            else if (line.Contains("\"method\":\"account/rateLimits/read\"") && Environment.GetEnvironmentVariable("FAKE_CODEX_LIMITS") == "neterror")
+            {
+                Console.Error.WriteLine("2026-11-13T00:17:54.379481Z ERROR codex_app_server: Authorization: Bearer CANARYBEARERTOKEN0123456789 Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings");
+                Console.Error.Flush();
+                Console.Out.WriteLine("{\"id\":" + id + ",\"error\":{\"code\":-32603,\"message\":\"failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage?access_token=CANARYQUERYSECRET0123456789abcdef)\"}}");
+                Console.Out.Flush();
+            }
             else if (line.Contains("\"method\":\"account/rateLimits/read\""))
                 Reply(id, "{\"rateLimits\":{\"limitId\":\"codex\",\"planType\":\"pro\",\"primary\":{\"windowDurationMins\":300,\"usedPercent\":12,\"resetsAt\":1893456000},\"secondary\":{\"windowDurationMins\":10080,\"usedPercent\":34,\"resetsAt\":1893456000}}}");
             else if (line.Contains("\"method\":\"account/usage/read\""))

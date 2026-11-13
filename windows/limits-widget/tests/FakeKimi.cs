@@ -81,8 +81,13 @@ static class FakeKimi
                 else if (!authed) { status = 401; body = "{\"code\":40101,\"msg\":\"unauthorized\"}"; }
                 else if (path.StartsWith("/api/v1/auth")) body = "{\"code\":0,\"data\":{}}";
                 else if (path.StartsWith("/api/v1/oauth/usage"))
+                {
+                    // счётчик запросов квоты: тест проверяет, что за один опрос сервер спрашивают один раз
+                    string hits = Environment.GetEnvironmentVariable("FAKE_KIMI_MARK");
+                    if (hits != null) lock (typeof(FakeKimi)) File.AppendAllText(Path.Combine(hits, "usage-hits.txt"), "1" + Environment.NewLine);
                     body = Environment.GetEnvironmentVariable("FAKE_KIMI_USAGE")
                         ?? "{\"code\":0,\"data\":{\"kind\":\"ok\",\"quota\":{\"usages\":{\"limit5h\":{\"usedRatio\":0.25},\"monthTotal\":{\"usedRatio\":0.5},\"monthCode\":{\"usedRatio\":0.2}}}}}";
+                }
                 else { status = 404; body = "{}"; }
                 var bytes = Encoding.UTF8.GetBytes(body);
                 var head = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " X\r\nContent-Type: application/json\r\nContent-Length: " + bytes.Length + "\r\nConnection: close\r\n\r\n");

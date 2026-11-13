@@ -77,7 +77,7 @@ namespace LimitsWidget
                 string ferr;
                 var fq = ParseServer(Json.TryParse(fx), out ferr);
                 if (fq == null)
-                    return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Ответ сервера Kimi Code: " + ferr, Placeholders());
+                    return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "Ответ сервера Kimi Code: " + ferr, Placeholders());
                 Fill(snap, fq);
                 ProviderUtil.MarkFresh(snap, ctx, true);
                 ApplyLevel(snap, ctx, PreviousLevel(ctx));
@@ -93,7 +93,7 @@ namespace LimitsWidget
                 string aerr;
                 var aq = ParseApi(Json.TryParse(fx), out aerr);
                 if (aq == null)
-                    return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Ответ Kimi: " + aerr, Placeholders());
+                    return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "Ответ Kimi: " + aerr, Placeholders());
                 Fill(snap, aq);
                 ProviderUtil.MarkFresh(snap, ctx, true);
                 return snap;
@@ -115,12 +115,17 @@ namespace LimitsWidget
             if (ctx.Svc.StartServer)
             {
                 string exe = Cli.Resolve(ctx.Svc.Command, "kimi");
-                if (exe == null) startNote = "kimi (Kimi Code CLI) не найден в PATH — установите его или укажите services.kimi.command.";
+                if (exe == null) startNote = "Kimi Code не найден — установите его или укажите путь в config.json.";
                 else
                 {
                     string detail;
                     var launch = server.EnsureStarted(exe, out detail);
-                    if (launch == KimiServerManager.Launch.Started || launch == KimiServerManager.Launch.Running)
+                    if (launch == KimiServerManager.Launch.Running && probe.AskedOwn)
+                    {
+                        // собственный сервер уже спрошен в этом опросе (шаг 1) и не дал квот: второй запрос за цикл не нужен
+                        startNote = probe.Note;
+                    }
+                    else if (launch == KimiServerManager.Launch.Started || launch == KimiServerManager.Launch.Running)
                     {
                         // первый запуск: ждём регистрации экземпляра дольше обычного бюджета, но не бесконечно
                         var wait = DateTime.UtcNow.AddSeconds(launch == KimiServerManager.Launch.Started ? 30 : 10);
@@ -133,7 +138,10 @@ namespace LimitsWidget
                     else if (launch == KimiServerManager.Launch.Backoff)
                         startNote = "Скрытый сервер Kimi Code недавно завершился — " + detail + ".";
                     else
-                        startNote = "Скрытый сервер Kimi Code не запущен: " + (detail ?? "ошибка запуска") + ".";
+                    {
+                        Log.Write("kimi: скрытый сервер не запущен: " + (detail ?? "ошибка запуска"));   // причина — только в журнал
+                        startNote = "Скрытый сервер Kimi Code не запущен — подробности в widget.log.";
+                    }
                 }
             }
 
@@ -143,12 +151,12 @@ namespace LimitsWidget
                 if (probe.Invalid)
                     return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Сервер Kimi Code вернул недопустимые значения квот — показан прошлый снимок.", Placeholders());
                 if (probe.Tried > 0)
-                    return ProviderUtil.Fail(snap, SvcStatus.Error, "нет ответа", "Локальный сервер Kimi Code не ответил (" + probe.Tried + " экз.) — повторю при следующем обновлении." + (startNote != null ? " " + startNote : ""), Placeholders());
+                    return ProviderUtil.FailTech(snap, SvcStatus.Error, "нет ответа", "локальный сервер Kimi Code не ответил (" + probe.Tried + " экз.)" + (startNote != null ? "; " + startNote : ""), Placeholders());
                 if (startNote != null)
                     return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет сервера", startNote, Placeholders());
-                return ProviderUtil.Fail(snap, SvcStatus.NeedsPermission, "нужен доступ",
-                    "Локальный сервер Kimi Code не найден. Запустите Kimi Code (`kimi web --no-open`), включите services.kimi.startServer или разрешите прямой запрос: allowLocalTokens в config.json",
-                    Placeholders());
+                // как включить собственный сервер виджета или прямой запрос — в журнал, в карточке — одна короткая фраза
+                Log.Write("kimi: локальный сервер не найден; включите services.kimi.startServer или allowLocalTokens в config.json");
+                return ProviderUtil.Fail(snap, SvcStatus.NeedsPermission, "нужен доступ", "Локальный сервер Kimi Code не найден — запустите Kimi Code.", Placeholders());
             }
 
             string file = FindTokenFile(home);
@@ -165,7 +173,7 @@ namespace LimitsWidget
                 return LoginNeeded(snap);
             if (expires.HasValue && Fmt.NotAfter(expires.Value, ctx.Now.AddSeconds(30)))
                 return ProviderUtil.Fail(snap, SvcStatus.Stale, "ждём Kimi Code",
-                    "Вход Kimi Code продлевает сам Kimi Code: запустите Kimi Code или включите services.kimi.startServer — виджет подхватит его сессию.", Placeholders());
+                    "Вход Kimi Code продлевает сам Kimi Code — запустите его, виджет подхватит сессию.", Placeholders());
 
             string url = (ctx.Svc.BaseUrl ?? "https://api.kimi.com/coding/v1").TrimEnd('/') + "/usages";
             int status;
@@ -174,12 +182,12 @@ namespace LimitsWidget
             if (status == 401)
                 return LoginNeeded(snap);
             if (body == null || status < 200 || status >= 300)
-                return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Kimi usages: HTTP " + status, Placeholders());
+                return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "Kimi usages: HTTP " + status, Placeholders());
 
             string perr;
             var q = ParseApi(Json.TryParse(body), out perr);
             if (q == null)
-                return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Ответ Kimi: " + perr, Placeholders());
+                return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "Ответ Kimi: " + perr, Placeholders());
             Fill(snap, q);
             if (snap.Bars.Count == 0)
                 return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "Ответ Kimi без квот", Placeholders());
@@ -297,6 +305,7 @@ namespace LimitsWidget
             public KimiQuota Quota;
             public Instance From;   // экземпляр, ответивший квотой (для уровня аккаунта)
             public bool Login, Invalid, Owned;
+            public bool AskedOwn;   // среди спрошенных экземпляров был собственный сервер виджета
             public int Tried;
             public string Note;
         }
@@ -332,7 +341,9 @@ namespace LimitsWidget
                     int left = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
                     if (left <= 200) break;
                     probe.Tried++;
-                    if (Ask(inst, token, Math.Min(PerCandidateMs, left), probe)) { probe.Owned = server.Owns(inst.Pid); return probe; }
+                    bool own = server.Owns(inst.Pid);
+                    if (own) probe.AskedOwn = true;
+                    if (Ask(inst, token, Math.Min(PerCandidateMs, left), probe)) { probe.Owned = own; return probe; }
                     if (probe.Login) return probe;   // вход общий для всех экземпляров одного каталога
                 }
                 token = null;
@@ -729,7 +740,7 @@ namespace LimitsWidget
         }
 
         // useProxy=false — запрос на свою машину (локальный сервер приложения), системный прокси не нужен
-        static string Get(string url, string token, int timeoutMs, bool useProxy, out int status)
+        internal static string Get(string url, string token, int timeoutMs, bool useProxy, out int status)
         {
             status = 0;
             try
@@ -753,6 +764,12 @@ namespace LimitsWidget
             {
                 var r = ex.Response as HttpWebResponse;
                 if (r != null) { status = (int)r.StatusCode; r.Close(); }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                // обрыв при чтении тела, неверный адрес, сбой потока и прочее: для вызывающего это «нет ответа», карточка не падает
+                Log.Write("kimi: запрос не удался (" + ex.GetType().Name + ")");
                 return null;
             }
         }

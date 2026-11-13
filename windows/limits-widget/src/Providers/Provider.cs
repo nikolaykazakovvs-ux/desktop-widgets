@@ -63,6 +63,19 @@ namespace LimitsWidget
             return snap;
         }
 
+        // Сбой с техническим текстом (stderr CLI, исключение, ответ сервера): подробности — только в widget.log
+        // (без токенов и параметров адресов), в карточке — короткая фраза по смыслу. Сбой связи помечается отдельно:
+        // «нет связи» вместо «ошибка» и быстрый повтор.
+        public static ServiceSnapshot FailTech(ServiceSnapshot snap, SvcStatus status, string statusText, string technical, params LimitBar[] placeholders)
+        {
+            Log.Write(snap.Id + ": " + UserText.Redact(technical));
+            bool link;
+            string message = UserText.Failure(UserText.ServiceName(snap.Id, snap.Title), technical, out link);
+            Fail(snap, status, link && status == SvcStatus.Error ? "нет связи" : statusText, message, placeholders);
+            snap.LinkDown = link;
+            return snap;
+        }
+
         public static void MarkFresh(ServiceSnapshot snap, ProviderContext ctx, bool fixture)
         {
             var completed = ctx.UtcNow();

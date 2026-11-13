@@ -154,11 +154,13 @@ namespace LimitsWidget
     {
         static readonly object Gate = new object();
 
-        // Токены и ответы API сюда не пишутся — только тип ошибки и служебный текст.
+        // Токены и ответы API сюда не пишутся — только тип ошибки и служебный текст. На всякий случай каждая строка
+        // проходит вычистку: Bearer-токены, ключи в параметрах, длинные ключеподобные последовательности и параметры адресов.
         public static void Write(string line)
         {
             try
             {
+                line = UserText.Scrub(line);
                 lock (Gate)
                 {
                     string path = Path.Combine(Program.BaseDir, "widget.log");

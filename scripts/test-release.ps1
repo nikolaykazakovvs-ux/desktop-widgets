@@ -360,7 +360,7 @@ if ($testLimits) {
     $extractReceiptPath = Join-Path $scratch 'extract-receipt.json'
     & $updaterScript -PackagePath $limitsZip -ExtractTo $extractOnlyDir -ReceiptPath $extractReceiptPath | Out-Null
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $extractReceiptPath)) 'Isolated -ExtractTo failed.'
-    $extractReceipt = Get-Content -LiteralPath $extractReceiptPath -Raw | ConvertFrom-Json
+    $extractReceipt = Get-Content -LiteralPath $extractReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert ($extractReceipt.mode -eq 'extract-only' -and $extractReceipt.status -eq 'EXTRACTED_ONLY' -and $extractReceipt.acceptance -eq $false -and $extractReceipt.mutatedTarget -eq $false) 'Extract receipt flags invalid.'
     Invoke-UpdaterExpectFail @{ PackagePath = $limitsZip; ExtractTo = $extractOnlyDir } 'extract into existing non-empty directory' 'already exists and is not empty'
 
@@ -433,7 +433,7 @@ if ($testLimits) {
     $dryRunReceiptPath = Join-Path $scratch 'dryrun-receipt.json'
     & $updaterScript -TargetPath $legacyInstall -PackagePath $limitsZip -DryRun -ReceiptPath $dryRunReceiptPath | Out-Null
     Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $dryRunReceiptPath)) 'Dry-run failed.'
-    $dryRunReceipt = Get-Content -LiteralPath $dryRunReceiptPath -Raw | ConvertFrom-Json
+    $dryRunReceipt = Get-Content -LiteralPath $dryRunReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert ($dryRunReceipt.mode -eq 'dry-run' -and $dryRunReceipt.acceptance -eq $false -and $dryRunReceipt.mutatedTarget -eq $false) 'Dry-run receipt flags invalid.'
     Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $oldExeHash) 'Dry-run modified LimitsWidget.exe.'
     Assert (Test-Path -LiteralPath (Join-Path $legacyInstall 'src/legacy-item.txt')) 'Dry-run moved legacy src.'
@@ -448,7 +448,7 @@ if ($testLimits) {
             InjectFailure = $stage
             ReceiptPath   = $failReceiptPath
         } "failure injection $stage" "Update failed and was cleanly rolled back.*Simulated failure injection: $stage"
-        $failReceipt = Get-Content -LiteralPath $failReceiptPath -Raw | ConvertFrom-Json
+        $failReceipt = Get-Content -LiteralPath $failReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert ($failReceipt.status -eq 'ROLLED_BACK_ON_FAILURE' -and $failReceipt.mutatedTarget -eq $false) "Rollback receipt not written for $stage."
         Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $oldExeHash) "Rollback failed to restore LimitsWidget.exe after $stage."
         Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'config.json')) -eq $expectedConfigHash) "Rollback failed to preserve config.json after $stage."
@@ -475,7 +475,7 @@ if ($testLimits) {
             GracefulStopTimeoutSeconds = 1
             ReceiptPath                = $abortReceiptPath
         } 'target process refusing graceful exit' 'Graceful shutdown could not be confirmed.*Force termination is disabled by policy'
-        $abortReceipt = Get-Content -LiteralPath $abortReceiptPath -Raw | ConvertFrom-Json
+        $abortReceipt = Get-Content -LiteralPath $abortReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert ($abortReceipt.status -eq 'ABORTED_PROCESS_STILL_RUNNING' -and $abortReceipt.mutatedTarget -eq $false) 'Abort-before-mutation receipt invalid.'
         Assert (-not $stubbornProc.HasExited) 'Updater force-killed a target process that ignored graceful close!'
         Assert ((Get-LowerSha256 (Join-Path $legacyInstall 'LimitsWidget.exe')) -eq $oldExeHash) 'Aborted update mutated LimitsWidget.exe.'
@@ -534,7 +534,7 @@ if ($testLimits) {
         $updateReceiptPath = Join-Path $scratch 'update-receipt.json'
         & $updaterScript -TargetPath $legacyInstall -PackagePath $limitsZip -ReceiptPath $updateReceiptPath | Out-Null
         Assert ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $updateReceiptPath)) 'Live graceful update on scratch legacy install failed.'
-        $updateReceipt = Get-Content -LiteralPath $updateReceiptPath -Raw | ConvertFrom-Json
+        $updateReceipt = Get-Content -LiteralPath $updateReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert ($updateReceipt.status -eq 'UPDATED' -and $updateReceipt.acceptance -eq $false -and $updateReceipt.mutatedTarget -eq $true) 'Update receipt status invalid.'
         Assert ($ownedProc.WaitForExit(5000)) 'Target LimitsWidget.exe did not exit gracefully during update.'
 

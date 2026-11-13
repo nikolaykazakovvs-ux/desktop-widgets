@@ -280,6 +280,7 @@ namespace LimitsWidget
         public TokenActivity Activity;   // статистика использования (Codex); null — нет
         public long Generation;       // номер опроса (только в памяти): поздний результат старого опроса не затирает новый
         public bool Partial;          // ранний результат: основные квоты готовы, дополнительные сведения ещё догружаются
+        public bool LinkDown;         // сбой связан с сетью (только в памяти): повторять скоро, а не через полный интервал
         public List<ExtraItem> Extras = new List<ExtraItem>();   // плашки эпизодических данных (кредиты, сбросы, лимиты трат)
         public List<LimitBar> Bars = new List<LimitBar>();
         public List<string> Notes = new List<string>();

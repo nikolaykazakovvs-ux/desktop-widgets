@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -20,6 +21,9 @@ namespace LimitsWidget
         readonly Dictionary<string, IProvider> providers = new Dictionary<string, IProvider>(StringComparer.OrdinalIgnoreCase);
         readonly object gate = new object();
         long generation;
+        // Сбой связи по сервисам текущего опроса и итог последнего завершённого опроса: при сбое повтор делается скоро.
+        ConcurrentDictionary<string, bool> cycleLink = new ConcurrentDictionary<string, bool>();
+        volatile bool linkFailure;
 
         public Collector(Config cfg, State state, string fixtures)
             : this(cfg, state, fixtures, null, null, null) { }
@@ -37,6 +41,9 @@ namespace LimitsWidget
 
         public long Generation { get { return Interlocked.Read(ref generation); } }
 
+        // В последнем опросе хотя бы один сервис не ответил из-за сети.
+        public bool LinkFailure { get { return linkFailure; } }
+
         public List<ServiceSnapshot> Collect()
         {
             return Collect(null);
@@ -51,10 +58,12 @@ namespace LimitsWidget
                 long gen = Interlocked.Increment(ref generation);
 
                 var ids = cfg.Order.Where(id => providers.ContainsKey(id) && cfg.Svc(id).Enabled).ToList();
+                cycleLink = new ConcurrentDictionary<string, bool>();
                 try { if (telemetry != null) telemetry.Configure(ids, cfg.RefreshSeconds); }
                 catch (Exception ex) { Log.Write("telemetry configure: " + ex.GetType().Name); }
                 var tasks = ids.Select(id => Task.Factory.StartNew(() => CollectOne(id, gen, onResult), TaskCreationOptions.LongRunning)).ToArray();
                 Task.WaitAll(tasks);
+                linkFailure = cycleLink.Values.Any(v => v);
                 return tasks.Select(t => t.Result).ToList();
             }
         }
@@ -78,7 +87,7 @@ namespace LimitsWidget
             }
             catch (Exception ex)
             {
-                Log.Write(id + ": " + ex);
+                Log.Write(id + ": " + ex);   // Log.Write вычищает секреты и параметры адресов
                 if (core != null)
                 {
                     // ранний результат уже опубликован — догрузка не удалась, квоты остаются действительными
@@ -87,8 +96,10 @@ namespace LimitsWidget
                 }
                 snap = ProviderUtil.NewSnap(ctx, id);
                 snap.Status = SvcStatus.Error;
-                snap.StatusText = "ошибка";
-                snap.Message = "Сбой сбора данных (" + ex.GetType().Name + ") — подробности в widget.log";
+                bool link;
+                snap.Message = UserText.Failure(UserText.ServiceName(id, snap.Title), ex.GetType().Name + ": " + ex.Message, out link);
+                snap.StatusText = link ? "нет связи" : "ошибка";
+                snap.LinkDown = link;   // подробности уже в widget.log
             }
             snap.Generation = gen;
             var result = Complete(id, snap, core, false);
@@ -110,10 +121,12 @@ namespace LimitsWidget
         {
             DateTime now = utcNow().ToLocalTime();
             var svc = cfg.Svc(id);
+            Sanitize(snap);
             // время попытки — завершение основного запроса: догрузка его не сдвигает
             snap.LastAttemptAt = core != null ? core.LastAttemptAt : utcNow();
             // провайдер не должен портить уже опубликованные квоты поздней ошибкой догрузки
             if (core != null && snap.Status != SvcStatus.Ok && snap.Status != SvcStatus.Fixture) return core;
+            if (!early) cycleLink[id] = snap.LinkDown && snap.Status != SvcStatus.Ok && snap.Status != SvcStatus.Fixture;
             PlanResolver.Apply(snap, svc);
             state.PutAttempt(snap);
             if (snap.Status == SvcStatus.Ok || snap.Status == SvcStatus.Fixture)
@@ -143,8 +156,41 @@ namespace LimitsWidget
             return Published(cached);
         }
 
+        // Предохранитель: технический текст (исключение, stderr CLI, URL, JSON, английская фраза) в карточку не попадает ни от
+        // одного провайдера, даже от того, кто забыл FailTech или добавит новую ошибку. Подробности — в widget.log, пользователю —
+        // короткая фраза по смыслу. Работает над сообщением и пояснениями; кэш и статусы не меняет, кроме подписи «нет связи».
+        internal static void Sanitize(ServiceSnapshot snap)
+        {
+            if (snap == null) return;
+            string name = UserText.ServiceName(snap.Id, snap.Title);
+            bool failed = snap.Status != SvcStatus.Ok && snap.Status != SvcStatus.Fixture;
+            if (UserText.LooksTechnical(snap.Message)) snap.Message = Replacement(snap, name, snap.Message, failed);
+            for (int i = snap.Notes.Count - 1; i >= 0; i--)
+            {
+                if (!UserText.LooksTechnical(snap.Notes[i])) continue;
+                string text = Replacement(snap, name, snap.Notes[i], failed);
+                if (text == snap.Message || (snap.Notes.IndexOf(text) >= 0 && snap.Notes.IndexOf(text) != i)) snap.Notes.RemoveAt(i);
+                else snap.Notes[i] = text;
+            }
+        }
+
+        static string Replacement(ServiceSnapshot snap, string name, string raw, bool failed)
+        {
+            Log.Write(snap.Id + ": " + UserText.Redact(raw));
+            if (!failed) return UserText.NeutralNote;
+            bool link;
+            string text = UserText.Failure(name, raw, out link);
+            if (link)
+            {
+                snap.LinkDown = true;
+                if (snap.Status == SvcStatus.Error && snap.StatusText == "ошибка") snap.StatusText = "нет связи";
+            }
+            return text;
+        }
+
         ServiceSnapshot Published(ServiceSnapshot snap)
         {
+            Sanitize(snap);
             try { if (telemetry != null) telemetry.Accept(snap); }
             catch (Exception ex) { Log.Write("telemetry projection: " + ex.GetType().Name); }
             return snap;
