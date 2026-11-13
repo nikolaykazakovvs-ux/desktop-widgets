@@ -20,7 +20,7 @@ try {
   process.stdin.once('end', () => process.exit(0));
   process.stdin.once('close', () => process.exit(0));
   await serveStdio(() => {
-    const server = new McpServer({ name: 'desktop-widgets-ai-telemetry-bridge', version: '1.0.0' });
+    const server = new McpServer({ name: 'widgets-bridge', version: '1.0.0' });
     server.registerTool(toolName, {
       description: 'Read-only facts from Desktop Widgets telemetry snapshots (hardware resources, subscription quota windows, API balances when a producer publishes them, data quality and deterministic pressure hints). Does not poll providers or the OS, does not choose executors.',
       inputSchema: z.strictObject({}),

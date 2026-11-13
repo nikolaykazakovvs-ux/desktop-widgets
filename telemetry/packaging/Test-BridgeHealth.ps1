@@ -22,11 +22,29 @@ try {
         }
         $nv = "$(& node --version 2>&1)"
         if ($nv -match '^v(\d+)' -and [int]$Matches[1] -ge 20) { $checks['node'] = $nv } else { Fail 'node' "need >=20, got $nv" }
-        $cmd = Join-Path $root 'bridge-cli.cmd'
-        if (-not (Test-Path -LiteralPath $cmd)) { Fail 'launcher' 'bridge-cli.cmd missing' }
+        foreach ($l in 'widgets-bridge.cmd', 'widgets-bridge-server.cmd') { if (-not (Test-Path -LiteralPath (Join-Path $root $l))) { Fail "launcher_$l" 'missing (run Install or Update)' } }
+        $dpath = Join-Path $root 'discovery.json'
+        $useFacts = $false   # CLI is called the way discovery.json says (commands.facts only when the installed version has it)
+        if (-not (Test-Path -LiteralPath $dpath)) { Fail 'discovery' 'discovery.json missing (run Install or Update)' }
+        else {
+            try {
+                $d = Get-Content -LiteralPath $dpath -Raw | ConvertFrom-Json
+                $dp = @()
+                if ($d.kind -ne 'widgets-bridge-discovery' -or $d.schemaVersion -ne '1.0.0') { $dp += 'kind/schemaVersion' }
+                if ($d.bridge.version_id -ne $cur.current) { $dp += "version_id $($d.bridge.version_id) differs from current $($cur.current)" }
+                if (-not (Test-Path -LiteralPath $d.launchers.cli)) { $dp += 'launchers.cli does not exist' }
+                if (-not (Test-Path -LiteralPath $d.launchers.mcp_server)) { $dp += 'launchers.mcp_server does not exist' }
+                $useFacts = [bool]$d.commands.PSObject.Properties['facts']
+                if ($d.PSObject.Properties['capabilities'] -and $d.capabilities.facts -ne $useFacts) { $dp += 'capabilities.facts differs from commands.facts' }
+                if ($dp.Count -eq 0) { $checks['discovery'] = 'ok' } else { Fail 'discovery' ($dp -join '; ') }
+            } catch { Fail 'discovery' "unreadable: $($_.Exception.Message)" }
+        }
+        $cmd = Join-Path $root 'widgets-bridge.cmd'
+        if (-not (Test-Path -LiteralPath $cmd)) { Fail 'launcher' 'widgets-bridge.cmd missing' }
         else {
             $fx = Join-Path $vdir 'fixtures\normal'
-            $out = (& $cmd --fixture $fx --as-of 2026-01-01T12:00:00Z 2>&1 | Out-String)
+            $cliArgs = if ($useFacts) { @('facts', '--json') } else { @() }
+            $out = (& $cmd @cliArgs --fixture $fx --as-of 2026-01-01T12:00:00Z 2>&1 | Out-String)
             if ($LASTEXITCODE -ne 0) { Fail 'cli' "exit $LASTEXITCODE" }
             else {
                 try {

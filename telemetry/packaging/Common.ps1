@@ -108,6 +108,74 @@ function Write-Launchers([string]$Root, [string]$VersionId) {
     # %~dp0 вместо абсолютного пути: ASCII-файл, безопасно для не-ASCII путей установки
     Write-AtomicText (Join-Path $Root 'bridge-server.cmd') "@echo off`r`nnode `"%~dp0versions\$VersionId\bridge\server.mjs`" %*`r`n"
     Write-AtomicText (Join-Path $Root 'bridge-cli.cmd') "@echo off`r`nnode `"%~dp0versions\$VersionId\bridge\cli.mjs`" %*`r`n"
+    # Имена Моста виджетов; прежние bridge-*.cmd остаются для совместимости с пилотной установкой.
+    Write-AtomicText (Join-Path $Root 'widgets-bridge-server.cmd') "@echo off`r`nnode `"%~dp0versions\$VersionId\bridge\server.mjs`" %*`r`n"
+    Write-AtomicText (Join-Path $Root 'widgets-bridge.cmd') "@echo off`r`nnode `"%~dp0versions\$VersionId\bridge\cli.mjs`" %*`r`n"
+}
+
+# Версия контракта телеметрии установленной версии: из схемы ответа и core.mjs (то, что Bridge реально отдаёт).
+function Get-BridgeContract([string]$VersionDir) {
+    $schema = Get-Content -LiteralPath (Join-Path $VersionDir 'schema\bridge-output.schema.json') -Raw | ConvertFrom-Json
+    $core = Get-Content -LiteralPath (Join-Path $VersionDir 'bridge\core.mjs') -Raw
+    # Расширение api_limits: единственное строковое значение schema_extension в core.mjs; нет или несколько разных - null.
+    $ext = $null
+    $vals = @([regex]::Matches($core, "schema_extension:\s*'(api-limits/[^']+)'") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+    if ($vals.Count -eq 1) { $ext = $vals[0] }
+    return [ordered]@{ schemaVersion = $schema.properties.schemaVersion.const; policy_version = $schema.properties.policy_version.const; api_limits_extension = $ext }
+}
+
+# Что УСТАНОВЛЕННАЯ версия умеет на самом деле (по её собственным файлам, а не по текущим исходникам): подкоманда facts
+# в CLI (строка кода в options.mjs с литералом 'facts', комментарии не считаются) и данные api_limits (расширение в core.mjs
+# и чтение api-balances-snapshot.json в reader.mjs). После отката на старую версию discovery не должен обещать лишнего.
+function Get-BridgeCapabilities([string]$VersionDir, $Contract) {
+    $facts = $false
+    $opt = Join-Path $VersionDir 'bridge\options.mjs'
+    if (Test-Path -LiteralPath $opt) { $facts = [bool](Select-String -LiteralPath $opt -Pattern "^[^/]*['""]facts['""]" -Quiet) }
+    $api = $false
+    $reader = Join-Path $VersionDir 'bridge\reader.mjs'
+    if ($Contract.api_limits_extension -and (Test-Path -LiteralPath $reader)) { $api = [bool](Select-String -LiteralPath $reader -SimpleMatch 'api-balances-snapshot.json' -Quiet) }
+    return [ordered]@{ facts = $facts; api_limits = $api }
+}
+
+# discovery.json: точка обнаружения Моста виджетов для агентов (атомарная запись, без секретов).
+# Возможности (commands.facts, data api_limits) записываются по файлам УСТАНОВЛЕННОЙ версии (см. Get-BridgeCapabilities).
+# Пути абсолютные и содержат профиль пользователя: файл приватный, живёт только в InstallRoot, в репозиторий не попадает.
+function Write-Discovery([string]$Root, [string]$VersionId) {
+    Assert-VersionId $VersionId 'discovery version'
+    $vdir = Join-Path $Root "versions\$VersionId"
+    $manifest = Get-Content -LiteralPath (Join-Path $vdir 'manifest.json') -Raw | ConvertFrom-Json
+    $cur = Read-Current $Root
+    $cli = Join-Path $Root 'widgets-bridge.cmd'
+    $srv = Join-Path $Root 'widgets-bridge-server.cmd'
+    $telDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'DesktopWidgets\telemetry' } else { $null }
+    $snap = { param($file) if ($telDir) { Join-Path $telDir $file } else { $null } }
+    $contract = Get-BridgeContract $vdir
+    $cap = Get-BridgeCapabilities $vdir $contract
+    $commands = [ordered]@{}
+    if ($cap.facts) { $commands.facts = "`"$cli`" facts --json" }
+    $commands.cli = "`"$cli`""
+    $commands.mcp = [ordered]@{ server_name = 'widgets-bridge'; transport = 'stdio'; command = $srv; args = @(); tools = @('get_telemetry_and_quotas') }
+    $data = @(
+        [ordered]@{ key = 'subscription_quotas'; snapshot = (& $snap 'quotas-snapshot.json'); optional = $false }
+        [ordered]@{ key = 'hardware_state'; snapshot = (& $snap 'hardware-snapshot.json'); optional = $false }
+    )
+    if ($cap.api_limits) { $data += [ordered]@{ key = 'api_limits'; snapshot = (& $snap 'api-balances-snapshot.json'); optional = $true } }
+    $doc = [ordered]@{
+        schemaVersion = '1.0.0'
+        kind = 'widgets-bridge-discovery'
+        name = 'widgets-bridge'
+        written_at = (Get-Date).ToUniversalTime().ToString('o')
+        bridge = [ordered]@{ version_id = $VersionId; package_version = $manifest.version; installed_at = $cur.installed_at; install_root = $Root }
+        telemetry_contract = $contract
+        capabilities = $cap
+        launchers = [ordered]@{ cli = $cli; mcp_server = $srv }
+        commands = $commands
+        telemetry_dir = $telDir
+        telemetry_dir_env_override = 'DESKTOP_WIDGETS_TELEMETRY_DIR'
+        data = $data
+        note = 'Freshness and statuses are not stored here: only "facts" (or the MCP tool) returns them, checked against the contract. Paths are private to this machine.'
+    }
+    Write-AtomicText (Join-Path $Root 'discovery.json') ($doc | ConvertTo-Json -Depth 6)
 }
 
 function Read-Current([string]$Root) {

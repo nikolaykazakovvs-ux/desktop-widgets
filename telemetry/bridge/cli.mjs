@@ -1,11 +1,12 @@
 // CLI: one bridge-output JSON on stdout (exit 0) or a fixed error code on stderr (exit 2).
+// `widgets-bridge facts [--json] [...]` is the stable agent entry point: the same output as the bare call.
 import { performance } from 'node:perf_hooks';
 import { parseArgs, createSource, ownMetrics } from './options.mjs';
 
 const started = performance.now();
 let output;
 try {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(process.argv.slice(2), { cli: true });
   const source = createSource(options);
   output = source.read();
   process.stdout.write(`${JSON.stringify(output)}\n`);

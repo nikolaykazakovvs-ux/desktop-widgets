@@ -1,5 +1,5 @@
 {
   "type": "stdio",
-  "command": "<InstallRoot>\\bridge-server.cmd",
+  "command": "<InstallRoot>\\widgets-bridge-server.cmd",
   "args": []
 }

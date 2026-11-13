@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { parseStrictJson, validateDocument, deriveOutput, deepEqual, instant, ageMs, ContractError, outputSchema } from './core.mjs';
+import { parseArgs } from './options.mjs';
 import { TelemetryReader, loadFixture, ConfigError, getCurrentUserSid, extractSid, verifySddl, assertPrivateSecurity, aclVerificationCache } from './reader.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -223,6 +224,7 @@ async function withClient(args, action) {
 test('MCP: tools/list, strict empty input, canonical outputSchema, fixture scenarios', { timeout: 30000 }, async () => {
   for (const id of ['normal', 'partial', 'quota-reset-pending']) {
     await withClient(['--fixture', join(fixtures, id), '--as-of', AS_OF], async client => {
+      assert.equal(client.getServerVersion()?.name, 'widgets-bridge', 'serverInfo.name equals the registered server name');
       const { tools } = await client.listTools();
       assert.deepEqual(tools.map(t => t.name), ['get_telemetry_and_quotas']);
       assert.deepEqual(tools[0].outputSchema, outputSchema);
@@ -264,6 +266,23 @@ test('CLI: exit 0 with pure JSON, exit 2 on configuration errors', () => {
   const missingLive = run(['--telemetry-dir', join(work, `absent-${Date.now()}`)]);
   assert.equal(missingLive.code, 0);
   assert.equal(JSON.parse(missingLive.out).hardware_state.status, 'unavailable');
+});
+test('CLI: facts is a synonym of the bare call; --json is a no-op; facts is rejected anywhere but first and by the server', () => {
+  const run = args => { try { return { code: 0, out: execFileSync(process.execPath, [join(here, 'cli.mjs'), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; } catch (e) { return { code: e.status, out: e.stdout }; } };
+  const base = ['--fixture', join(fixtures, 'normal'), '--as-of', AS_OF];
+  const bare = run(base);
+  assert.equal(bare.code, 0);
+  for (const args of [['facts', ...base], ['facts', '--json', ...base], ['facts', ...base, '--json'], ['--json', ...base]]) {
+    const r = run(args);
+    assert.equal(r.code, 0, args.join(' '));
+    assert.equal(r.out, bare.out, 'identical output: ' + args.join(' '));
+  }
+  assert.deepEqual(JSON.parse(bare.out), JSON.parse(fixtureJson('normal', 'bridge-output.json')));
+  assert.equal(run([...base, 'facts']).code, 2);
+  assert.equal(run(['facts', 'facts', ...base]).code, 2);
+  assert.equal(run(['facts', '--bogus', ...base]).code, 2);
+  assert.throws(() => parseArgs(['facts'], { server: true }), e => e instanceof ConfigError);
+  assert.throws(() => parseArgs(['--json'], { server: true }), e => e instanceof ConfigError);
 });
 // ---------- A1-API: api_limits extension (reader, node derivation, node invariants, ACL re-verification) ----------
 const testPoolId = 'pool_0123456789abcdef0123';
