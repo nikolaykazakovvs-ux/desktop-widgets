@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -28,6 +29,7 @@ namespace LimitsWidget
         readonly Collector collector;
         readonly TelemetryPublisher telemetry;
         readonly DispatcherTimer timer = new DispatcherTimer();
+        readonly DispatcherTimer networkRetry = new DispatcherTimer();   // одноразовый быстрый повтор после появления сети
         readonly string exePath;
         readonly TrayIcon tray;
         readonly Hotkey hotkey;
@@ -87,6 +89,9 @@ namespace LimitsWidget
             Closed += (s, e) =>
             {
                 timer.Stop();
+                networkRetry.Stop();
+                NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
+                NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
                 // свой скрытый сервер Kimi завершается вместе с виджетом (не при сворачивании в трей)
                 KimiServerManager.Shared.Dispose();
                 if (telemetry != null) telemetry.Dispose();
@@ -111,6 +116,9 @@ namespace LimitsWidget
 
             timer.Interval = TimeSpan.FromSeconds(30);
             timer.Tick += (s, e) => OnTick();
+            networkRetry.Tick += (s, e) => { networkRetry.Stop(); RetryAfterNetwork(); };
+            NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
+            NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
             Render();
         }
 
@@ -129,8 +137,50 @@ namespace LimitsWidget
 
         void OnTick()
         {
-            if (!busy && (!lastStart.HasValue || (DateTime.Now - lastStart.Value).TotalSeconds >= cfg.RefreshSeconds)) Refresh();
+            // после сбоя связи — повтор раз в минуту, а не через полный интервал обновления
+            int due = RetryPolicy.DueSeconds(collector.LinkFailure, cfg.RefreshSeconds);
+            if (!busy && (!lastStart.HasValue || (DateTime.Now - lastStart.Value).TotalSeconds >= due)) Refresh();
             else Render();   // обновить обратный отсчёт до сброса
+        }
+
+        // Сеть появилась или сменила адрес. События приходят из рабочего потока и пачками: переносим в UI и сводим в один повтор.
+        void OnNetworkAvailabilityChanged(object sender, NetworkAvailabilityEventArgs e)
+        {
+            if (e.IsAvailable) NetworkMayBeBack();
+        }
+
+        void OnNetworkAddressChanged(object sender, EventArgs e)
+        {
+            NetworkMayBeBack();
+        }
+
+        void NetworkMayBeBack()
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    NetState.Reset();
+                    // обновлять досрочно нужно только если прошлый опрос не дошёл до сети
+                    if (!collector.LinkFailure) return;
+                    networkRetry.Stop();
+                    networkRetry.Interval = TimeSpan.FromSeconds(RetryPolicy.AfterNetworkSeconds);
+                    networkRetry.Start();
+                }));
+            }
+            catch (Exception ex) { Log.Write("network event: " + ex.GetType().Name); }
+        }
+
+        void RetryAfterNetwork()
+        {
+            if (busy)
+            {
+                // идёт опрос, начатый ещё без сети: повторить сразу после него
+                networkRetry.Interval = TimeSpan.FromSeconds(RetryPolicy.AfterNetworkSeconds);
+                networkRetry.Start();
+                return;
+            }
+            Refresh();
         }
 
         void Refresh()

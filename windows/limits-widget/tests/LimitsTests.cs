@@ -41,6 +41,9 @@ namespace LimitsWidget
                 Console.WriteLine(report[report.Count - 1]);
                 return;
             }
+            // LIMITS_TESTS_ONLY — запускать только разделы, имя которых начинается с одного из перечисленных через «;» префиксов.
+            string only = Environment.GetEnvironmentVariable("LIMITS_TESTS_ONLY") ?? "";
+            if (only.Trim().Length > 0 && !only.Split(';').Any(x => x.Trim().Length > 0 && name.StartsWith(x.Trim(), StringComparison.Ordinal))) return;
             var sw = Stopwatch.StartNew();
             int before = assertions;
             body();
@@ -1140,6 +1143,439 @@ namespace LimitsWidget
             if (failure != null) throw new Exception("UI: " + failure.Message, failure);
         }
 
+        // ---------- короткие сообщения вместо технических текстов ----------
+
+        // Реальные тексты с экрана оператора 13.11.2026 (интернет был отключён).
+        const string ScreenCodex = "codex app-server: failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage) (2026-11-13T00:17:54.379481Z ERROR codex_app_server: Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated se…)";
+        const string ScreenAgyTimeout = "agy /usage: не ответил вовремя";
+        const string ScreenAgyNet = "agy /usage: код 1: error: /usage failed: retrieving quota summary: failed to retrieve user quota summary: failed to get load code assist response: Post \"https:…";
+        const string ScreenClaude = "claude /usage не вернул лимитов: You are currently using your subscription to power your Claude Code usage";
+        const string ScreenKimi = "Локальный сервер Kimi Code не найден. Запустите Kimi Code (`kimi web --no-open`), включите services.kimi.startServer или разрешите прямой запрос: allowLocalTokens в config.json";
+
+        // Собственные сообщения виджета — короткие, по-русски: предохранитель их трогать не должен.
+        static readonly string[] HumanTexts =
+        {
+            "Kimi Code просит войти — нажмите «Войти в Kimi Code» (вход выполняет сам Kimi Code).",
+            "Вход Claude Code истёк — нажмите «Войти».",
+            "Вход Claude Code истёк. Пока показаны данные приложения Claude — без лимитов по моделям и времени сброса.",
+            "Лимит исчерпан — Claude Code работает за счёт Usage credits.",
+            "Лимит исчерпан — Codex работает за счёт кредитов. Можно применить бесплатный сброс в Codex.",
+            "Кредиты рабочей области закончились.",
+            "Достигнут лимит использования рабочей области.",
+            "Claude Code не найден — установите его или укажите путь в config.json.",
+            "Antigravity CLI не найден — установите его или укажите путь в config.json.",
+            "Codex не найден — установите его или укажите путь в config.json.",
+            "Kimi Code не найден — установите его или укажите путь в config.json.",
+            "Локальный сервер Kimi Code не найден — запустите Kimi Code.",
+            "Вход Kimi Code продлевает сам Kimi Code — запустите его, виджет подхватит сессию.",
+            "Скрытый сервер Kimi Code недавно завершился — повтор после 14:03.",
+            "Скрытый сервер Kimi Code не запущен — подробности в widget.log.",
+            "Сервер Kimi Code вернул недопустимые значения квот — показан прошлый снимок.",
+            "Ответ Kimi без квот",
+            "Вход не завершён. Можно повторить в отдельном окне — там же видна ссылка для входа.",
+            UserText.NeutralNote
+        };
+
+        static string ReadLog()
+        {
+            string path = Path.Combine(Program.BaseDir, "widget.log");
+            return File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : "";
+        }
+
+        // Журнал секции — отдельный каталог: проверяем только то, что записано внутри неё.
+        static void WithLog(string name, Action body)
+        {
+            string saved = Program.BaseDir;
+            Program.BaseDir = NewDir(name);
+            try { body(); }
+            finally { Program.BaseDir = saved; }
+        }
+
+        static bool Technical(string text) { return UserText.LooksTechnical(text); }
+
+        static bool NoRawMarkers(string t)
+        {
+            return t != null && t.IndexOf("://", StringComparison.Ordinal) < 0 && t.IndexOf("ERROR", StringComparison.Ordinal) < 0
+                && t.IndexOf("код ", StringComparison.Ordinal) < 0 && t.IndexOf("app-server", StringComparison.Ordinal) < 0
+                && t.IndexOf("/usage", StringComparison.Ordinal) < 0 && t.IndexOf('`') < 0 && t.IndexOf('{') < 0;
+        }
+
+        static void ShortErrorsWording()
+        {
+            // четыре случая с экрана: каждый — технический, а замена — короткая фраза без кода, адресов и имён процессов
+            foreach (var raw in new[] { ScreenCodex, ScreenAgyTimeout, ScreenAgyNet, ScreenClaude, ScreenKimi })
+                Check(Technical(raw), "screen text detected as technical: " + raw.Substring(0, 24));
+            foreach (var name in new[] { "Codex", "GPT / Codex", "Claude Code", "Antigravity", "Kimi" })
+                foreach (var raw in new[] { ScreenCodex, ScreenAgyTimeout, ScreenAgyNet, ScreenClaude, ScreenKimi })
+                {
+                    string h = UserText.Humanize(name, raw);
+                    Check(NoRawMarkers(h) && !Technical(h) && h.Length < 110 && h.Contains(name), "humanized text is short and clean: " + h);
+                }
+            Check(UserText.Humanize("Codex", ScreenCodex).StartsWith("Нет связи с сервером Codex"), "codex screen text -> no link");
+            Check(UserText.Humanize("Antigravity", ScreenAgyNet).StartsWith("Нет связи с сервером Antigravity"), "agy screen text -> no link");
+            Check(UserText.Humanize("Antigravity", ScreenAgyTimeout) == "Antigravity не ответил вовремя — повторю при следующем обновлении.", "agy timeout phrase");
+            Check(UserText.Humanize("Claude Code", ScreenClaude) == "Не удалось получить данные Claude Code — повторю при следующем обновлении.", "claude screen text -> generic phrase");
+            Check(UserText.Humanize("Kimi", ScreenKimi).StartsWith("Не удалось получить данные Kimi"), "kimi long instruction -> generic phrase");
+            Check(UserText.Humanize("Kimi", "Kimi usages: HTTP 401") == "Kimi просит войти заново.", "401 -> login");
+            Check(UserText.Humanize("Kimi", "forbidden").EndsWith("просит войти заново."), "403/forbidden -> login");
+            Check(UserText.Humanize("Codex", "HTTP 401 connection reset").EndsWith("просит войти заново."), "login wins over link");
+            Check(UserText.Humanize("Codex", "HTTP 429 too many requests") == "Codex временно ограничил запросы — повторю позже.", "429 -> rate limited");
+            Check(UserText.Humanize("Codex", "operation timed out") == "Codex не ответил вовремя — повторю при следующем обновлении.", "timeout phrase");
+            Check(UserText.Humanize("Codex", "что-то странное") == "Не удалось получить данные Codex — повторю при следующем обновлении.", "other -> generic phrase");
+            Check(UserText.Humanize(null, null) == "Не удалось получить данные сервиса — повторю при следующем обновлении.", "null-safe");
+            Check(UserText.ServiceName("claude", null) == "Claude Code" && UserText.ServiceName("kimi", " ") == "Kimi" && UserText.ServiceName("codex", "GPT / Codex") == "GPT / Codex", "service names");
+
+            // человеческие тексты предохранитель не трогает
+            foreach (var t in HumanTexts) Check(!Technical(t), "human text kept: " + t);
+            foreach (var kind in new[] { FailKind.Other, FailKind.NeedLogin, FailKind.NoLink, FailKind.RateLimited, FailKind.TimedOut })
+                foreach (var offline in new[] { false, true })
+                    foreach (var name in new[] { "Codex", "GPT / Codex", "Claude Code", "Antigravity", "Kimi" })
+                        Check(!Technical(UserText.Phrase(name, kind, offline)), "phrase is never technical: " + UserText.Phrase(name, kind, offline));
+
+            // будущие ошибки, которых нет ни в одном списке
+            foreach (var future in new[]
+            {
+                "Quota backend rejected the request, retry later", "Service temporarily unavailable", "quota exceeded", "Timeout", "ECONNRESET",
+                "Сбой: ECONNRESET", "Unexpected token < in JSON at position 0", "HTTP 502", "Ошибка 0x80070005", "at Foo.Bar(String x)", "{\"error\":1}",
+                "line one\nline two", "C:\\Users\\x\\file.json не читается", "failed 2026-11-13T00:17:54", "Запуск codex app-server не удался", "claude /usage не ответил", "kimi не отвечает", new string('я', 161)
+            })
+                Check(Technical(future), "future technical text caught: " + (future.Length > 30 ? future.Substring(0, 30) : future));
+            Check(!Technical(null) && !Technical("") && !Technical("OK"), "empty/short values are not technical");
+
+            // журнал: без Bearer, ключей в параметрах, длинных токенов и параметров адресов; адрес без параметров виден
+            string red = UserText.Redact(ScreenCodex + " Authorization: Bearer SECRETBEARER123 token=SECRETTOKEN456 https://x.test/a?access_token=SECRETQUERY789&b=1 key " + new string('a', 20) + "1" + new string('b', 20));
+            Check(red.Contains("https://chatgpt.com/backend-api/wham/usage") && red.Contains("error sending request"), "log keeps the original text and address");
+            Check(!red.Contains("SECRETBEARER") && !red.Contains("SECRETTOKEN") && !red.Contains("SECRETQUERY") && !red.Contains("access_token") && !red.Contains(new string('a', 20)), "log redacts bearer, secrets, query and long tokens: " + red);
+            Check(red.Contains("https://x.test/a"), "address kept without parameters");
+            Check(UserText.Redact(new string('x', 1000)).Length == 600 && UserText.Redact("a\r\nb\n  c") == "a b c", "log text: one line, at most 600 chars");
+            Check(UserText.Redact(null) == "", "redact null");
+            Check(UserText.Scrub("{\"token\":\"SECRETJSON\",\"x\":1}") == "{\"token\":\"…\",\"x\":1}", "json secret pair scrubbed: " + UserText.Scrub("{\"token\":\"SECRETJSON\",\"x\":1}"));
+
+            // сам журнал виджета чистит строки при записи
+            WithLog("short-log-scrub", () =>
+            {
+                Log.Write("probe Bearer LOGSECRET1 and https://h.test/p?sig=LOGSECRET2 password=LOGSECRET3");
+                string log = ReadLog();
+                Check(log.Contains("probe") && log.Contains("https://h.test/p") && !log.Contains("LOGSECRET"), "widget.log scrubbed on write: " + log);
+            });
+        }
+
+        static void ShortErrorsOfflineAndRetry()
+        {
+            int probes = 0;
+            DateTime clock = new DateTime(2026, 11, 13, 10, 0, 0, DateTimeKind.Utc);
+            NetState.UtcNow = () => clock;
+            NetState.Probe = () => { probes++; return true; };
+            NetState.Reset();
+            try
+            {
+                bool link;
+                string offline = UserText.Failure("Codex", "что-то странное", out link);
+                Check(link && offline == "Нет связи с интернетом — Codex обновится, как только появится сеть.", "no network: separate short phrase");
+                UserText.Failure("Codex", "и ещё", out link);
+                Check(probes == 1, "network check cached");
+                clock = clock.AddSeconds(11);
+                UserText.Failure("Codex", "и ещё", out link);
+                Check(probes == 2, "network check refreshed after 10 s");
+                NetState.Reset();
+                UserText.Failure("Codex", "и ещё", out link);
+                Check(probes == 3, "reset forces a new check");
+                string login = UserText.Failure("Codex", "HTTP 401", out link);
+                Check(!link && login == "Codex просит войти заново.", "login problem is not reported as no network");
+                NetState.Probe = () => { throw new InvalidOperationException("probe broke"); };
+                NetState.Reset();
+                Check(!NetState.IsOffline(), "broken probe is not 'no network'");
+                NetState.Probe = () => false;
+                NetState.Reset();
+                string noLink = UserText.Failure("Codex", ScreenCodex, out link);
+                Check(link && noLink.StartsWith("Нет связи с сервером Codex"), "server unreachable while network is up: link failure");
+                string other = UserText.Failure("Codex", "что-то странное", out link);
+                Check(!link && other.StartsWith("Не удалось получить данные Codex"), "unknown failure with network up: no link flag");
+
+                // повтор: после сбоя связи — не позже минуты, иначе обычный интервал
+                Check(RetryPolicy.DueSeconds(true, 300) == RetryPolicy.LinkRetrySeconds && RetryPolicy.LinkRetrySeconds <= 60, "link failure -> retry within a minute");
+                Check(RetryPolicy.DueSeconds(true, 30) == 30 && RetryPolicy.DueSeconds(false, 300) == 300, "retry never slower than the interval; no failure -> normal interval");
+                Check(RetryPolicy.AfterNetworkSeconds <= 5, "after the network appears: quick retry");
+
+                // сборщик: сбой связи виден как «нет связи», LinkFailure держится до первого опроса без него
+                WithLog("short-link-collector", () =>
+                {
+                    var cfg = new Config();
+                    cfg.Order = new List<string> { "codex" };
+                    cfg.Svc("codex").Enabled = true;
+                    bool failNow = true;
+                    var p = new Scripted { Id = "codex", Body = ctx =>
+                    {
+                        var s = ProviderUtil.NewSnap(ctx, "codex");
+                        if (!failNow) return OkSnap(ctx, "codex", 10);
+                        return ProviderUtil.FailTech(s, SvcStatus.Error, "ошибка", ScreenCodex, ProviderUtil.Placeholder("7 д", "Неделя"));
+                    } };
+                    var st = new State();
+                    var col = new Collector(cfg, st, null, null, new IProvider[] { p }, null);
+                    Check(!col.LinkFailure, "no failure before the first poll");
+                    var r = col.Collect()[0];
+                    Check(r.Status == SvcStatus.Error && r.StatusText == "нет связи" && r.Message.StartsWith("Нет связи с сервером") && col.LinkFailure, "link failure: card says no link, quick retry requested");
+                    Check(st.GetAttempt("codex").Message == r.Message && NoRawMarkers(st.GetAttempt("codex").Message), "state keeps the short text, not the raw one");
+                    failNow = false;
+                    var ok = col.Collect()[0];
+                    Check(ok.Status == SvcStatus.Ok && !col.LinkFailure, "next poll succeeds: normal rhythm again");
+                    failNow = true;
+                    var stale = col.Collect()[0];
+                    Check(stale.Status == SvcStatus.Stale && stale.Bars.Count > 0 && stale.Message.StartsWith("Нет связи с сервером") && col.LinkFailure, "stale data keeps the bars, shows no-link phrase, asks for quick retry");
+                    string log = ReadLog();
+                    Check(log.Contains("error sending request for url (https://chatgpt.com/backend-api/wham/usage)"), "technical text is in widget.log");
+                });
+            }
+            finally
+            {
+                NetState.UtcNow = () => DateTime.UtcNow;
+                NetState.Probe = () => false;   // тесты никогда не ходят в сеть
+                NetState.Reset();
+            }
+        }
+
+        // Предохранитель сборщика: от любого провайдера, в том числе от ошибок, о которых никто не подумал.
+        static void ShortErrorsBreaker()
+        {
+            WithLog("short-breaker", () =>
+            {
+                var cfg = new Config();
+                cfg.Order = new List<string> { "claude", "kimi", "antigravity", "codex" };
+                foreach (var id in cfg.Order) cfg.Svc(id).Enabled = true;
+                Func<string, SvcStatus, string, Scripted> raw = (id, status, message) => new Scripted { Id = id, Body = ctx =>
+                    ProviderUtil.Fail(ProviderUtil.NewSnap(ctx, id), status, "ошибка", message, ProviderUtil.Placeholder("5 ч", "x")) };
+                var st = new State();
+                var providers = new IProvider[]
+                {
+                    raw("claude", SvcStatus.Error, "Unexpected HTTP 502 from https://api.example.test/v1/usage?token=BREAKERSECRET1: {\"error\":\"bad gateway\"}"),
+                    raw("kimi", SvcStatus.NeedsPermission, ScreenKimi),
+                    raw("antigravity", SvcStatus.Error, "Quota backend rejected the request, retry later"),
+                    new Scripted { Id = "codex", Body = ctx => { throw new InvalidOperationException("boom https://x.test/p?sig=BREAKERSECRET2 deep inside"); } }
+                };
+                var col = new Collector(cfg, st, null, null, providers, null);
+                var res = col.Collect().ToDictionary(s => s.Id);
+                foreach (var id in cfg.Order)
+                {
+                    var s = res[id];
+                    Check(!Technical(s.Message) && NoRawMarkers(s.Message) && s.Message.Length < 110, id + ": no technical text reaches the card: " + s.Message);
+                    Check(st.GetAttempt(id) != null && !Technical(st.GetAttempt(id).Message), id + ": state keeps the short text");
+                }
+                Check(res["claude"].Message.StartsWith("Нет связи с сервером Claude Code"), "502 from a provider that forgot FailTech: no link phrase");
+                Check(res["antigravity"].Message.StartsWith("Не удалось получить данные Antigravity"), "future English error -> generic phrase");
+                Check(res["codex"].Status == SvcStatus.Error && res["codex"].Message.StartsWith("Не удалось получить данные") && !res["codex"].Message.Contains("boom"), "provider exception -> short phrase");
+                Check(res["kimi"].Status == SvcStatus.NeedsPermission && !res["kimi"].Message.Contains("startServer"), "long instruction is replaced");
+                string log = ReadLog();
+                Check(log.Contains("api.example.test/v1/usage") && log.Contains("bad gateway") && log.Contains("Quota backend rejected") && log.Contains("boom"), "raw texts are in widget.log");
+                Check(!log.Contains("BREAKERSECRET"), "log has no query secrets: " + log);
+
+                // успешный снимок: служебные пояснения не показываются, человеческие остаются
+                var okCol = new Collector(cfg, new State(), null, null, new IProvider[]
+                {
+                    new Scripted { Id = "claude", Body = ctx =>
+                    {
+                        var s = OkSnap(ctx, "claude", 5);
+                        s.Message = "Server said: please upgrade your plan now";
+                        s.Notes.Add("error: something went wrong in module X");
+                        s.Notes.Add("Тариф определён вручную");
+                        return s;
+                    } },
+                    new Scripted { Id = "kimi", Body = ctx =>
+                    {
+                        var s = OkSnap(ctx, "kimi", 5);
+                        s.Message = HumanTexts[3];
+                        s.Notes.Add("Первая запись");
+                        return s;
+                    } }
+                }, null);
+                var ok = okCol.Collect().ToDictionary(s => s.Id);
+                Check(ok["claude"].Status == SvcStatus.Ok && ok["claude"].Bars.Count == 1 && ok["claude"].Message == UserText.NeutralNote, "ok snapshot: technical message replaced, data kept");
+                Check(ok["claude"].Notes.Count == 1 && ok["claude"].Notes[0] == "Тариф определён вручную", "technical note dropped (same text as the message), human note kept");
+                Check(ok["kimi"].Message == HumanTexts[3] && ok["kimi"].Notes.Count == 1 && ok["kimi"].Notes[0] == "Первая запись", "human texts untouched");
+
+                // устаревший снимок из кэша: данные остаются, текст ошибки — короткий
+                bool fail = false;
+                var staleCol = new Collector(cfg, new State(), null, null, new IProvider[] { new Scripted { Id = "claude", Body = ctx =>
+                    fail ? ProviderUtil.Fail(ProviderUtil.NewSnap(ctx, "claude"), SvcStatus.Error, "ошибка", "You are currently using your subscription to power your Claude Code usage") : OkSnap(ctx, "claude", 7) } }, null);
+                staleCol.Collect();
+                fail = true;
+                var stale = staleCol.Collect()[0];
+                Check(stale.Status == SvcStatus.Stale && stale.Bars.Count == 1 && stale.Bars[0].Used == 7 && !Technical(stale.Message) && stale.Message.StartsWith("Не удалось получить данные Claude Code"), "stale card: data kept, short text: " + stale.Message);
+            });
+        }
+
+        // Четыре примера с экрана через настоящие провайдеры и поддельные CLI (без сети и аккаунтов).
+        static void ShortErrorsScreenCases()
+        {
+            WithLog("short-screen", () =>
+            {
+                Environment.SetEnvironmentVariable("FAKE_CLAUDE_LOG", null);
+                Environment.SetEnvironmentVariable("FAKE_CLAUDE_AUTH", "max");
+                var cfg = new Config();
+                foreach (var id in cfg.Order) cfg.Svc(id).Enabled = true;
+                Func<string, IProvider, ServiceSnapshot> run = (id, p) =>
+                {
+                    cfg.Order = new List<string> { id };
+                    return new Collector(cfg, new State(), null, null, new IProvider[] { p }, null).Collect()[0];
+                };
+
+                // 1. Codex: ошибка сети от app-server (английский текст, адрес с параметром-секретом, ERROR в stderr)
+                cfg.Svc("codex").Command = fakeCodex;
+                cfg.Svc("codex").TimeoutSeconds = 20;
+                Environment.SetEnvironmentVariable("FAKE_CODEX_USAGE", "ok");
+                Environment.SetEnvironmentVariable("FAKE_CODEX_LIMITS", "neterror");
+                var codex = run("codex", new CodexProvider());
+                Environment.SetEnvironmentVariable("FAKE_CODEX_LIMITS", null);
+                Check(codex.Status == SvcStatus.Error && codex.StatusText == "нет связи", "codex: card says no link");
+                Check(codex.Message == "Нет связи с сервером GPT / Codex — повторю автоматически." && NoRawMarkers(codex.Message), "codex: short phrase instead of the raw error: " + codex.Message);
+                string log = ReadLog();
+                Check(log.Contains("failed to fetch codex rate limits: error sending request for url (https://chatgpt.com/backend-api/wham/usage)") && log.Contains("codex_app_server"), "codex: original text in widget.log: " + log);
+                Check(!log.Contains("CANARYQUERYSECRET") && !log.Contains("CANARYBEARERTOKEN") && !log.Contains("access_token"), "codex: log has no query secret or bearer token");
+
+                // 2. Claude: CLI не вернул лимитов и печатает английское пояснение
+                cfg.Svc("claude").Command = fakeClaude;
+                cfg.Svc("claude").TimeoutSeconds = 20;
+                Environment.SetEnvironmentVariable("FAKE_CLI_USAGE", "subscription");
+                var claude = run("claude", new ClaudeProvider());
+                Check(claude.Status == SvcStatus.Error && claude.Message == "Не удалось получить данные Claude Code — повторю при следующем обновлении." && NoRawMarkers(claude.Message), "claude: generic short phrase: " + claude.Message);
+                Check(ReadLog().Contains("You are currently using your subscription to power your Claude Code usage"), "claude: original text in widget.log");
+                NetState.Probe = () => true;
+                NetState.Reset();
+                try
+                {
+                    var offline = run("claude", new ClaudeProvider());
+                    Check(offline.Message == "Нет связи с интернетом — Claude Code обновится, как только появится сеть." && offline.StatusText == "нет связи", "claude with no network: no-link state: " + offline.Message);
+                }
+                finally
+                {
+                    NetState.Probe = () => false;
+                    NetState.Reset();
+                }
+
+                // 3. Antigravity: сетевая ошибка agy (английский текст с адресом) и зависание
+                cfg.Svc("antigravity").Command = fakeClaude;   // поддельный CLI отвечает на -p "/usage" так же, как agy
+                cfg.Svc("antigravity").TimeoutSeconds = 20;
+                Environment.SetEnvironmentVariable("FAKE_CLI_USAGE", "agy-net");
+                var agy = run("antigravity", new AntigravityProvider());
+                Check(agy.Status == SvcStatus.Error && agy.Message == "Нет связи с сервером Antigravity — повторю автоматически." && NoRawMarkers(agy.Message), "agy: network error -> short no-link phrase: " + agy.Message);
+                log = ReadLog();
+                Check(log.Contains("antigravity: agy /usage: код 1: error: /usage failed") && !log.Contains("CANARYQUERYSECRET"), "agy: main path is logged, without secrets");
+                if (!NoHardKill)
+                {
+                    cfg.Svc("antigravity").TimeoutSeconds = 2;
+                    Environment.SetEnvironmentVariable("FAKE_CLI_USAGE", "hang");
+                    var hang = run("antigravity", new AntigravityProvider());
+                    Check(hang.Message == "Antigravity не ответил вовремя — повторю при следующем обновлении." && hang.StatusText == "ошибка", "agy: timeout phrase without process names: " + hang.Message);
+                    Check(ReadLog().Contains("antigravity: agy /usage: не ответил вовремя"), "agy: timeout is logged");
+                }
+                Environment.SetEnvironmentVariable("FAKE_CLI_USAGE", null);
+
+                // 4. Kimi: нет сервера — одна короткая фраза вместо инструкции
+                string home = NewDir("kimi-home-short");
+                Environment.SetEnvironmentVariable("KIMI_CODE_HOME", home);
+                cfg.Svc("kimi").StartServer = false;
+                var kimi = run("kimi", new KimiProvider(new KimiServerManager()));
+                Check(kimi.Status == SvcStatus.NeedsPermission && kimi.Message == "Локальный сервер Kimi Code не найден — запустите Kimi Code.", "kimi: short phrase instead of the instruction: " + kimi.Message);
+                Check(NoRawMarkers(kimi.Message) && kimi.Message.IndexOf("startServer", StringComparison.Ordinal) < 0 && kimi.Message.Length < 80, "kimi: no config keys or commands in the card");
+                Check(ReadLog().Contains("services.kimi.startServer"), "kimi: how to enable the server is in widget.log");
+            });
+        }
+
+        // Хвосты приёмки: исключения чтения ответа Kimi не роняют карточку; собственный сервер спрашивается раз за опрос.
+        static void ShortErrorsKimiTails()
+        {
+            WithLog("short-kimi-tails", () =>
+            {
+                int status;
+                string body = KimiProvider.Get("not a valid url", null, 1000, false, out status);
+                Check(body == null && status == 0, "invalid address does not throw");
+
+                // обрыв соединения посреди тела ответа
+                var l = new TcpListener(IPAddress.Loopback, 0);
+                l.Start();
+                int port = ((IPEndPoint)l.LocalEndpoint).Port;
+                var t = new Thread(() =>
+                {
+                    while (true)
+                    {
+                        TcpClient c;
+                        try { c = l.AcceptTcpClient(); }
+                        catch { return; }
+                        using (c)
+                        {
+                            try
+                            {
+                                var s = c.GetStream();
+                                var r = new StreamReader(s, Encoding.ASCII);
+                                string line;
+                                while (!string.IsNullOrEmpty(line = r.ReadLine())) { }
+                                var h = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 500\r\nConnection: close\r\n\r\n{\"partial\":");
+                                s.Write(h, 0, h.Length);
+                                s.Flush();
+                                Thread.Sleep(300);
+                                c.Client.LingerState = new LingerOption(true, 0);   // закрытие с RST: чтение тела оборвётся исключением
+                            }
+                            catch { }
+                        }
+                    }
+                }) { IsBackground = true };
+                t.Start();
+                try
+                {
+                    string cut = null;
+                    Exception thrown = null;
+                    try { cut = KimiProvider.Get("http://127.0.0.1:" + port + "/api/v1/oauth/usage", "tok", 3000, false, out status); }
+                    catch (Exception ex) { thrown = ex; }
+                    Check(thrown == null, "connection reset while reading the body does not throw: " + (thrown == null ? "" : thrown.GetType().Name));
+
+                    string home = NewDir("kimi-home-cut");
+                    Environment.SetEnvironmentVariable("KIMI_CODE_HOME", home);
+                    File.WriteAllText(Path.Combine(home, "server.token"), "synthetic-token");
+                    WriteInstance(home, "cut", port, Process.GetCurrentProcess().Id, NowMs());
+                    var cfg = new Config();
+                    cfg.Order = new List<string> { "kimi" };
+                    cfg.Svc("kimi").Enabled = true;
+                    cfg.Svc("kimi").StartServer = false;
+                    var r = new Collector(cfg, new State(), null, null, new IProvider[] { new KimiProvider(new KimiServerManager()) }, null).Collect()[0];
+                    Check(r.Status == SvcStatus.Error && !r.Message.Contains("Сбой сбора") && !Technical(r.Message) && r.Message.Contains("Kimi"), "read failure does not drop the card: " + r.Message);
+                }
+                finally { l.Stop(); }
+
+                // один опрос собственного сервера за цикл
+                string ownHome = NewDir("kimi-home-once"), mark = NewDir("kimi-mark-once");
+                Environment.SetEnvironmentVariable("KIMI_CODE_HOME", ownHome);
+                Environment.SetEnvironmentVariable("FAKE_KIMI_MARK", mark);
+                Environment.SetEnvironmentVariable("FAKE_KIMI_MODE", "ok");
+                Environment.SetEnvironmentVariable("FAKE_KIMI_USAGE", "{\"code\":0,\"data\":{\"kind\":\"error\",\"message\":\"upstream down\"}}");
+                var kcfg = new Config();
+                kcfg.Order = new List<string> { "kimi" };
+                kcfg.Svc("kimi").Enabled = true;
+                kcfg.Svc("kimi").Command = fakeKimi;
+                kcfg.Svc("kimi").StartServer = true;
+                kcfg.Svc("kimi").TimeoutSeconds = 10;
+                var mgr = new KimiServerManager();
+                try
+                {
+                    var col = new Collector(kcfg, new State(), null, null, new IProvider[] { new KimiProvider(mgr) }, null);
+                    string hits = Path.Combine(mark, "usage-hits.txt");
+                    Func<int> count = () => File.Exists(hits) ? File.ReadAllLines(hits).Count(x => x.Trim().Length > 0) : 0;
+                    var first = col.Collect()[0];
+                    Check(mgr.Launches == 1 && count() == 1, "cycle 1: server started, asked once (hits " + count() + ")");
+                    var second = col.Collect()[0];
+                    Check(mgr.Launches == 1 && count() == 2, "cycle 2: running server asked once, not twice (hits " + count() + ")");
+                    var third = col.Collect()[0];
+                    Check(count() == 3, "cycle 3: still one request per cycle (hits " + count() + ")");
+                    foreach (var s in new[] { first, second, third })
+                        Check(s.Status == SvcStatus.Error && !Technical(s.Message) && NoRawMarkers(s.Message), "failed cycle shows a short phrase: " + s.Message);
+                }
+                finally
+                {
+                    mgr.Dispose();
+                    Environment.SetEnvironmentVariable("FAKE_KIMI_USAGE", null);
+                    Environment.SetEnvironmentVariable("FAKE_KIMI_MARK", null);
+                }
+            });
+        }
+
         public static int Main(string[] args)
         {
             output = Path.GetFullPath(args[0]);
@@ -1147,6 +1583,7 @@ namespace LimitsWidget
             fakeCodex = Path.GetFullPath(args[2]);
             fakeClaude = Path.GetFullPath(args[3]);
             Program.BaseDir = output;
+            NetState.Probe = () => false;   // проверка сети в тестах подменена: настоящая ходит в сеть
             try
             {
                 Section("model roundtrip (url/actions/attention/plan/activity)", ModelRoundtrip);
@@ -1172,6 +1609,11 @@ namespace LimitsWidget
                 Section("UI render matrix, keyboard, Subscriptions dialog", UiMatrix);
                 Section("compact widget: no scroll, activity in owned popup", ActivityPopupChecks);
                 Section("popup owner monitor placement and DPI", ActivityPopupPlacement);
+                Section("short errors: wording, technical-text detector, log redaction", ShortErrorsWording);
+                Section("short errors: no-network state and quick retry", ShortErrorsOfflineAndRetry);
+                Section("short errors: collector breaker for any provider", ShortErrorsBreaker);
+                Section("short errors: four screen cases through real providers", ShortErrorsScreenCases);
+                Section("short errors: Kimi read exceptions and one poll per cycle", ShortErrorsKimiTails);
                 File.WriteAllLines(Path.Combine(output, "limits-tests.txt"), report);
                 Console.WriteLine("PASS: " + sections + " sections, " + assertions + " assertions; offline fakes only");
                 return 0;

@@ -39,15 +39,15 @@ namespace LimitsWidget
                     if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                     string exe = ResolveCodex(ctx.Svc);
                     if (exe == null)
-                        return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "codex не найден в PATH", Placeholder());
+                        return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "Codex не найден — установите его или укажите путь в config.json.", Placeholder());
                     string error;
                     session = AppServer.Start(exe, ctx.Svc.MaxProcesses, out error);
                     result = session == null ? null : session.Initialize(deadline, out error) ? session.Request("account/rateLimits/read", null, deadline, out error) : null;
                     if (result == null)
-                        return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "codex app-server: " + (session != null ? session.Explain(error) : error), Placeholder());
+                        return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "codex app-server: " + (session != null ? session.Explain(error) : error), Placeholder());
                 }
                 if (!FillLimits(snap, result, ctx, fixture))
-                    return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "codex не вернул окон лимитов", Placeholder());
+                    return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "codex не вернул окон лимитов", Placeholder());
 
                 // квоты готовы — в UI и телеметрию сразу; статистика догружается в том же процессе
                 ProviderUtil.MarkFresh(snap, ctx, fixture);

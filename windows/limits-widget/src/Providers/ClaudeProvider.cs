@@ -57,7 +57,7 @@ namespace LimitsWidget
                 if (ctx.FixtureOnly || !string.IsNullOrEmpty(ctx.FixturesDir)) throw new InvalidOperationException("fixture_missing");
                 string exe = cliExe = Cli.Resolve(ctx.Svc.Command, "claude");
                 if (exe == null)
-                    return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "claude не найден в PATH — укажите services.claude.command в config.json", Placeholders());
+                    return ProviderUtil.Fail(snap, SvcStatus.NoData, "нет CLI", "Claude Code не найден — установите его или укажите путь в config.json.", Placeholders());
                 if (guFix == null)
                 {
                     string guError;
@@ -76,7 +76,7 @@ namespace LimitsWidget
                 }
                 var r = Cli.Run(exe, "-p \"/usage\" --no-session-persistence --strict-mcp-config", ctx.Svc.TimeoutSeconds * 1000, ctx.Svc.MaxProcesses);
                 if (!r.Ok)
-                    return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка", "claude /usage: " + r.Describe(), Placeholders());
+                    return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка", "claude /usage: " + r.Describe(), Placeholders());
                 text = r.StdOut;
             }
 
@@ -128,7 +128,7 @@ namespace LimitsWidget
                     return failed;
                 }
                 string hint = Cli.FirstLine(text);
-                return ProviderUtil.Fail(snap, SvcStatus.Error, "ошибка",
+                return ProviderUtil.FailTech(snap, SvcStatus.Error, "ошибка",
                     "claude /usage не вернул лимитов" + (hint != null ? ": " + hint : ""), Placeholders());
             }
             ProviderUtil.MarkFresh(snap, ctx, fixture);
@@ -366,7 +366,8 @@ namespace LimitsWidget
                 if (reason != null)
                 {
                     snap.Attention = true;
-                    snap.Message = "Лимит заблокирован (" + reason + ")";
+                    Log.Write("claude: locked_reason " + reason);   // причина — служебное слово сервиса, в карточке не показывается
+                    snap.Message = "Лимит заблокирован сервисом.";
                     break;
                 }
             }
