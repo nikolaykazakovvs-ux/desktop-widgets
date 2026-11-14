@@ -36,6 +36,12 @@ try {
                 if (-not (Test-Path -LiteralPath $d.launchers.mcp_server)) { $dp += 'launchers.mcp_server does not exist' }
                 $useFacts = [bool]$d.commands.PSObject.Properties['facts']
                 if ($d.PSObject.Properties['capabilities'] -and $d.capabilities.facts -ne $useFacts) { $dp += 'capabilities.facts differs from commands.facts' }
+                if ($d.PSObject.Properties['capabilities'] -and $d.capabilities.PSObject.Properties['read_diagnostics']) {
+                    $hasDiag = [bool]$d.commands.PSObject.Properties['diagnose']
+                    $hasDiagTool = @($d.commands.mcp.tools) -contains 'get_read_diagnostics'
+                    if ($d.capabilities.read_diagnostics -ne $hasDiag) { $dp += 'capabilities.read_diagnostics differs from commands.diagnose' }
+                    if ($d.capabilities.read_diagnostics -ne $hasDiagTool) { $dp += 'capabilities.read_diagnostics differs from get_read_diagnostics in commands.mcp.tools' }
+                }
                 if ($dp.Count -eq 0) { $checks['discovery'] = 'ok' } else { Fail 'discovery' ($dp -join '; ') }
             } catch { Fail 'discovery' "unreadable: $($_.Exception.Message)" }
         }

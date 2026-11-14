@@ -11,7 +11,8 @@ export const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 
 export class ContractError extends Error {
   // code: invalid_input | clock_invalid. Messages are fixed strings, never input values.
-  constructor(code, message) { super(message); this.code = code; }
+  // details (optional, for read diagnostics only): { json_offset } or { schema_issue_paths }; never input values.
+  constructor(code, message, details = null) { super(message); this.code = code; this.details = details; }
 }
 const fail = (condition, message, code = 'invalid_input') => { if (condition) throw new ContractError(code, message); };
 
@@ -55,7 +56,7 @@ const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 export function parseStrictJson(text) {
   let i = 0;
   const n = text.length;
-  const bad = () => { throw new ContractError('invalid_input', 'invalid_json'); };
+  const bad = () => { throw new ContractError('invalid_input', 'invalid_json', { json_offset: i }); };
   const ws = () => { while (i < n) { const c = text.charCodeAt(i); if (c === 32 || c === 9 || c === 10 || c === 13) i++; else break; } };
   function string() {
     // text[i] === '"'
@@ -481,9 +482,25 @@ function checkApiLimitsNode(node, now) {
   }
 }
 
+// JSON pointers of schema violations, taken from the validator message ("data/a/0 must ..."). Only the instance
+// location is kept: segments outside [A-Za-z0-9_] become *, so no input value or odd key leaves the Bridge.
+export function schemaIssuePaths(issues) {
+  const paths = [];
+  for (const issue of issues ?? []) {
+    for (const match of String(issue?.message ?? '').matchAll(/(?:^|, )data((?:\/[^\s,]*)?) must/g)) {
+      const pointer = match[1].split('/').slice(1).map(seg => /^[A-Za-z0-9_]{1,64}$/.test(seg) ? seg : '*').map(seg => `/${seg}`).join('');
+      // read-diagnostics schema: maxLength 1024 per pointer; a longer one is dropped, not published.
+      if (pointer.length > 1024) continue;
+      if (!paths.includes(pointer)) paths.push(pointer);
+      if (paths.length >= 8) return paths;
+    }
+  }
+  return paths;
+}
+
 export function validateDocument(kind, document, now = null) {
   const result = validators[kind].validate(document);
-  fail(Boolean(result.issues), 'JSON Schema validation failed');
+  if (result.issues) throw new ContractError('invalid_input', 'JSON Schema validation failed', { schema_issue_paths: schemaIssuePaths(result.issues) });
   const clock = now ?? (kind === 'bridge-output' ? instant(document.generated_at) : nowMicros());
   clocks(document, clock);
   if (kind === 'hardware-snapshot') validateHardware(document);
@@ -697,6 +714,16 @@ export function deriveApiLimits(apiBalances, now, apiReadStatus = null) {
   };
 }
 
+// The node of the published form: the accepted source must still produce a node inside its schema; otherwise
+// the failure is isolated by the caller (deriveOutput, and the reader for read diagnostics).
+export function deriveApiLimitsChecked(apiBalances, now, apiReadStatus = null) {
+  const node = deriveApiLimits(apiBalances, now, apiReadStatus);
+  if (node.status !== 'not_available' && validators['bridge-api-limits'].validate(node).issues) {
+    throw new ContractError('invalid_input', 'api_limits_node_violates_schema');
+  }
+  return node;
+}
+
 // prevalidated: the caller (reader) already ran validateDocument with this exact clock on each source.
 export function deriveOutput(hardware, quotas, generatedAt, mode = 'fixture', hardwareReadStatus = null, quotasReadStatus = null, prevalidated = false, apiBalances = null, apiReadStatus = null) {
   const now = instant(generatedAt);
@@ -738,11 +765,7 @@ export function deriveOutput(hardware, quotas, generatedAt, mode = 'fixture', ha
   }
   let apiLimitsState;
   try {
-    apiLimitsState = deriveApiLimits(apiBalances, now, apiReadStatus);
-    // The accepted source must still produce a node of the published form; otherwise the failure is isolated here.
-    if (apiLimitsState.status !== 'not_available' && validators['bridge-api-limits'].validate(apiLimitsState).issues) {
-      throw new ContractError('invalid_input', 'api_limits_node_violates_schema');
-    }
+    apiLimitsState = deriveApiLimitsChecked(apiBalances, now, apiReadStatus);
   } catch (err) {
     const errReason = (err?.message === 'conflicting_shared_pool_balance')
       ? 'conflicting_shared_pool_balance'

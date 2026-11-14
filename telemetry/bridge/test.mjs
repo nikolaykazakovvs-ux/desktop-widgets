@@ -7,9 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { parseStrictJson, validateDocument, deriveOutput, deepEqual, instant, ageMs, ContractError, outputSchema } from './core.mjs';
+import { parseStrictJson, validateDocument, deriveOutput, deepEqual, instant, ageMs, ContractError, outputSchema, schemaIssuePaths } from './core.mjs';
 import { parseArgs } from './options.mjs';
 import { TelemetryReader, loadFixture, ConfigError, getCurrentUserSid, extractSid, verifySddl, assertPrivateSecurity, aclVerificationCache } from './reader.mjs';
+import { diagnosticsSchema, validateDiagnostics, scanPackageOverlays, securityDetail } from './diagnostics.mjs';
+import fs, { linkSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const repo = join(here, '..', '..');
@@ -226,7 +229,7 @@ test('MCP: tools/list, strict empty input, canonical outputSchema, fixture scena
     await withClient(['--fixture', join(fixtures, id), '--as-of', AS_OF], async client => {
       assert.equal(client.getServerVersion()?.name, 'widgets-bridge', 'serverInfo.name equals the registered server name');
       const { tools } = await client.listTools();
-      assert.deepEqual(tools.map(t => t.name), ['get_telemetry_and_quotas']);
+      assert.deepEqual(tools.map(t => t.name), ['get_telemetry_and_quotas', 'get_read_diagnostics']);
       assert.deepEqual(tools[0].outputSchema, outputSchema);
       assert.ok(!JSON.stringify(tools[0].outputSchema).includes('"$ref":"http'));
       assert.equal(tools[0].inputSchema.additionalProperties, false);
@@ -656,4 +659,310 @@ test('ACL: owner/DACL are verified again after rename-replace, in-place change a
   renameSync(tmpApi, join(dir, 'api-balances-snapshot.json'));
   const apiDenied = reader.read().api_limits;
   assert.deepEqual([apiDenied.status, apiDenied.reason, apiDenied.read_status, apiDenied.pools.length], ['error', 'access_denied', 'access_denied', 1]);
+});
+
+// ---------- read diagnostics (read-diagnostics 1.0.0): exact causes, stat/ACL before the retry loop, MSIX overlays ----------
+const noPackages = () => ({ ...process.env, LOCALAPPDATA: tempDir('no-packages-') });
+function diagnoseChecked(reader) {
+  const { output, diagnostics } = reader.diagnose();
+  validateDiagnostics(diagnostics);
+  validateDocument('bridge-output', output);
+  for (const node of ['hardware_state', 'subscription_quotas']) assert.equal(diagnostics.sources[node].read_status, output[node].read_status, `${node}: same read_status as bridge-output`);
+  assert.equal(diagnostics.generated_at, output.generated_at);
+  return { output, d: diagnostics };
+}
+
+test('read diagnostics: exact cause of each failure, same read_status as bridge-output, no file contents', () => {
+  const dir = liveDir();
+  const reader = new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() });
+  const first = diagnoseChecked(reader).d;
+  assert.deepEqual([first.sources.hardware_state.detail, first.sources.hardware_state.stage, first.sources.hardware_state.cache_used], ['none', 'none', false]);
+  assert.deepEqual([first.sources.api_limits.read_status, first.sources.api_limits.detail, first.sources.api_limits.stage], ['missing', 'file_not_found', 'open']);
+  assert.equal(first.package_overlay.status, process.platform === 'win32' ? 'none_found' : 'not_applicable');
+  const hw = join(dir, 'hardware-snapshot.json');
+  const good = liveDoc('normal', 'hardware-snapshot.json');
+  const semantic = structuredClone(good); semantic.metrics.commit_headroom_bytes.value -= 1;
+  const cases = [
+    [Buffer.alloc(4701), 'invalid_input', 'all_nul_bytes', 'parse', { json_offset: 0, size_bytes: 4701 }],
+    ['{"note":"sk-LEAKLEAKLEAKLEAK1234",', 'invalid_input', 'invalid_json', 'parse', { json_offset: 34 }],
+    [Buffer.from([0x7b, 0xc3, 0x28, 0x7d]), 'invalid_input', 'invalid_utf8', 'decode', { size_bytes: 4 }],
+    ['', 'invalid_input', 'empty_file', 'read', { size_bytes: 0 }],
+    [' '.repeat(1024 * 1024 + 1), 'invalid_input', 'file_too_large', 'read', { size_bytes: 1024 * 1024 + 1 }],
+    ['{"mode":"live","mode":"LEAK"}', 'invalid_input', 'duplicate_json_member', 'parse', {}],
+    [JSON.stringify(good).replace('"sample_interval_ms":1000', '"sample_interval_ms":9007199254740993'), 'invalid_input', 'unsafe_integer', 'parse', {}],
+    [JSON.stringify({ ...good, sample_interval_ms: 'LEAK' }), 'invalid_input', 'schema_validation_failed', 'validate', { paths: ['/sample_interval_ms'] }],
+    [JSON.stringify({ ...good, 'sk-LEAKLEAKLEAKLEAK': 1 }), 'invalid_input', 'schema_validation_failed', 'validate', { paths: [''] }],
+    [JSON.stringify(semantic), 'invalid_input', 'semantic_rule_failed', 'validate', { rule: 'commit headroom arithmetic mismatch' }],
+    [JSON.stringify({ ...good, mode: 'fixture' }), 'invalid_input', 'mode_mismatch', 'validate', {}],
+    [JSON.stringify({ ...good, published_at: '2026-01-01T12:00:05Z' }), 'clock_invalid', 'future_timestamp', 'validate', {}],
+  ];
+  for (const [content, status, detail, stage, extra] of cases) {
+    writeFileSync(hw, content);
+    const { output, d } = diagnoseChecked(reader);
+    const s = d.sources.hardware_state;
+    assert.deepEqual([output.hardware_state.read_status, s.read_status, s.detail, s.stage], [status, status, detail, stage], detail);
+    assert.equal(s.cache_used, true, `${detail}: the last verified snapshot is served`);
+    assert.equal(output.hardware_state.source.published_at, '2026-01-01T11:59:59Z', 'cache not rejuvenated');
+    if ('json_offset' in extra) assert.equal(s.json_offset, extra.json_offset, detail);
+    if ('size_bytes' in extra) assert.equal(s.size_bytes, extra.size_bytes, detail);
+    if (extra.rule) assert.equal(s.rule, extra.rule);
+    else assert.equal(s.rule, null, detail);
+    for (const path of extra.paths ?? []) assert.ok(s.schema_issue_paths.includes(path), `${detail}: ${JSON.stringify(s.schema_issue_paths)}`);
+    assert.equal(d.sources.subscription_quotas.detail, 'none', 'other source unaffected');
+    assert.ok(!JSON.stringify(d).includes('LEAK'), `${detail}: no file contents or odd keys in diagnostics`);
+  }
+  rmSync(hw);
+  const gone = diagnoseChecked(reader).d.sources.hardware_state;
+  assert.deepEqual([gone.read_status, gone.detail, gone.cache_used], ['missing', 'file_not_found', true]);
+  const cold = diagnoseChecked(new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() })).d.sources.hardware_state;
+  assert.deepEqual([cold.read_status, cold.detail, cold.cache_used], ['missing', 'file_not_found', false]);
+});
+
+test('stat before the retry loop: ENOENT/EPERM/EBUSY/EACCES/EIO keep regular statuses, never invalid_input; a short EBUSY is retried', () => {
+  if (process.platform !== 'win32') return;
+  const dir = liveDir();
+  const hw = join(dir, 'hardware-snapshot.json');
+  const original = fs.statSync;
+  const fault = { path: null, code: null, left: 0 };
+  fs.statSync = function (path, options) {
+    if (fault.code && fault.left !== 0 && String(path).toLowerCase() === fault.path.toLowerCase()) {
+      fault.left--;
+      const error = new Error(`fault ${fault.code}`); error.code = fault.code; throw error;
+    }
+    return original.call(this, path, options);
+  };
+  syncBuiltinESMExports();
+  try {
+    const reader = new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() });
+    assert.equal(reader.read().hardware_state.read_status, 'ok');
+    for (const [code, status, detail] of [['ENOENT', 'missing', 'file_not_found'], ['EPERM', 'access_denied', 'permission_error_after_retries'], ['EBUSY', 'transient_io_error', 'sharing_retries_exhausted'], ['EACCES', 'access_denied', 'os_access_denied'], ['EIO', 'transient_io_error', 'io_error']]) {
+      Object.assign(fault, { path: hw, code, left: -1 });
+      const { output, d } = diagnoseChecked(reader);
+      const s = d.sources.hardware_state;
+      // Persistent EPERM: the 25 ms retry deadline may be reached before the last attempt (Windows timer granularity);
+      // then it is transient, as in the read loop. Both are regular statuses; invalid_input never.
+      const expected = code === 'EPERM' && s.detail === 'sharing_retries_exhausted' ? ['transient_io_error', 'sharing_retries_exhausted'] : [status, detail];
+      assert.deepEqual([output.hardware_state.read_status, s.detail, s.stage, s.errno], [...expected, 'security_check', code], code);
+      assert.equal(output.subscription_quotas.read_status, 'ok', `${code}: other source unaffected`);
+    }
+    Object.assign(fault, { path: hw, code: 'EBUSY', left: 1 });
+    assert.equal(reader.read().hardware_state.read_status, 'ok', 'a short sharing collision is retried within the budget');
+    assert.equal(fault.left, 0);
+    // the directory stat at startup: a technical failure no longer ends a long-lived process; the first read checks again
+    Object.assign(fault, { path: dir, code: 'EPERM', left: -1 });
+    let started;
+    assert.doesNotThrow(() => { started = new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() }); });
+    Object.assign(fault, { code: null, left: 0 });
+    assert.equal(started.read().hardware_state.read_status, 'ok');
+  } finally {
+    fs.statSync = original;
+    syncBuiltinESMExports();
+  }
+});
+
+test('owner/DACL verdicts in diagnostics: the rule name without the SID', () => {
+  assert.equal(securityDetail('untrusted_owner: S-1-1-0'), 'untrusted_owner');
+  assert.equal(securityDetail('untrusted_allow_ace: WD'), 'untrusted_allow_ace');
+  assert.equal(securityDetail('null_dacl'), 'null_dacl');
+  assert.equal(securityDetail('something else'), 'unexpected_exception');
+  if (process.platform !== 'win32') return;
+  const dir = liveDir();
+  const hw = join(dir, 'hardware-snapshot.json');
+  execFileSync('icacls.exe', [hw, '/grant', '*S-1-1-0:(M)']);
+  const s = diagnoseChecked(new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() })).d.sources.hardware_state;
+  assert.deepEqual([s.read_status, s.detail, s.stage], ['access_denied', 'untrusted_allow_ace', 'security_check']);
+  // a cached verdict of another rule is reported with its own rule name
+  const fresh = liveDir();
+  const file = join(fresh, 'hardware-snapshot.json');
+  const st = statSync(file, { bigint: true });
+  aclVerificationCache.set(file.toLowerCase(), { ino: st.ino, ctime: st.ctimeMs, result: { ok: false, reason: 'untrusted_owner: S-1-5-21-1-2-3-500' } });
+  const { d } = diagnoseChecked(new TelemetryReader({ directory: fresh, clock: AS_OF, env: noPackages() }));
+  assert.equal(d.sources.hardware_state.detail, 'untrusted_owner');
+  assert.ok(!JSON.stringify(d).includes('S-1-'), 'no SID in diagnostics');
+});
+
+test('MSIX package overlay: zero-filled copy served to a packaged client is found and named (incident 14.11.2026)', () => {
+  // fixture mode: not applicable
+  const fixtureDiag = loadFixture(join(fixtures, 'normal'), { asOf: AS_OF }).reader.diagnose().diagnostics;
+  validateDiagnostics(fixtureDiag);
+  assert.equal(fixtureDiag.package_overlay.status, 'not_applicable');
+  if (process.platform !== 'win32') return;
+  const root = tempDir('localappdata-');
+  const tel = join(root, 'DesktopWidgets', 'telemetry');
+  mkdirSync(tel, { recursive: true });
+  const sid = getCurrentUserSid();
+  execFileSync('icacls.exe', [root, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F']);
+  writeFileSync(join(tel, 'hardware-snapshot.json'), JSON.stringify(liveDoc('normal', 'hardware-snapshot.json')));
+  writeFileSync(join(tel, 'quotas-snapshot.json'), JSON.stringify(liveDoc('normal', 'quotas-snapshot.json')));
+  const env = { ...process.env, LOCALAPPDATA: root };
+  // no Packages directory, then an unrelated package: none found
+  assert.deepEqual(scanPackageOverlays({ localAppData: root, telemetryDir: tel, files: ['hardware-snapshot.json'] }), { status: 'none_found', scanned_packages: 0, packages_with_overlay: [], copies: [], truncated: false, check_failed: false });
+  mkdirSync(join(root, 'Packages', 'Other.App_1234567890abc', 'LocalCache', 'Local'), { recursive: true });
+  const clean = diagnoseChecked(new TelemetryReader({ directory: tel, clock: AS_OF, env })).d;
+  assert.deepEqual([clean.package_overlay.status, clean.package_overlay.scanned_packages, clean.package_overlay.copies.length], ['none_found', 1, 0]);
+  // the 14.11 incident: the packaged client is served a zero-filled copy of hardware (simulated with a hard link,
+  // same file identity); a valid stale copy of quotas sits in the overlay while the real file is still read
+  const overlay = join(root, 'Packages', 'OpenAI.Codex_2p2nqsd0c76g0', 'LocalCache', 'Local', 'DesktopWidgets', 'telemetry');
+  mkdirSync(overlay, { recursive: true });
+  mkdirSync(join(root, 'Packages', 'Empty.Overlay_0000000000000', 'LocalCache', 'Local', 'DesktopWidgets'), { recursive: true });
+  writeFileSync(join(overlay, 'hardware-snapshot.json'), Buffer.alloc(4701));
+  rmSync(join(tel, 'hardware-snapshot.json'));
+  linkSync(join(overlay, 'hardware-snapshot.json'), join(tel, 'hardware-snapshot.json'));
+  writeFileSync(join(overlay, 'quotas-snapshot.json'), JSON.stringify(liveDoc('normal', 'quotas-snapshot.json')));
+  const { output, d } = diagnoseChecked(new TelemetryReader({ directory: tel, clock: AS_OF, env }));
+  assert.deepEqual([output.hardware_state.read_status, d.sources.hardware_state.detail, d.sources.hardware_state.size_bytes], ['invalid_input', 'all_nul_bytes', 4701]);
+  assert.equal(output.subscription_quotas.read_status, 'ok');
+  const o = d.package_overlay;
+  assert.equal(o.status, 'found');
+  assert.equal(o.scanned_packages, 3);
+  assert.deepEqual(o.packages_with_overlay.slice().sort(), ['Empty.Overlay_0000000000000', 'OpenAI.Codex_2p2nqsd0c76g0']);
+  const byFile = Object.fromEntries(o.copies.map(c => [c.file, c]));
+  assert.deepEqual(byFile['hardware-snapshot.json'], { package_family_name: 'OpenAI.Codex_2p2nqsd0c76g0', file: 'hardware-snapshot.json', size_bytes: 4701, all_nul_bytes: true, served_to_this_process: true });
+  assert.deepEqual([byFile['quotas-snapshot.json'].all_nul_bytes, byFile['quotas-snapshot.json'].served_to_this_process], [false, false]);
+  assert.equal(o.copies.length, 2);
+  const text = JSON.stringify(d);
+  assert.ok(!text.includes(root) && !text.includes('LocalCache'), 'no paths in diagnostics');
+});
+
+function overlayRoot() {
+  const root = tempDir('overlay-');
+  const pkg = (name, files = {}) => {
+    const dir = join(root, 'Packages', name, 'LocalCache', 'Local', 'DesktopWidgets');
+    mkdirSync(join(dir, 'telemetry'), { recursive: true });
+    for (const [file, content] of Object.entries(files)) writeFileSync(join(dir, 'telemetry', file), content);
+    return dir;
+  };
+  return { root, pkg };
+}
+const OVERLAY_FILES = ['hardware-snapshot.json'];
+const scanOf = (root, files = OVERLAY_FILES) => scanPackageOverlays({ localAppData: root, telemetryDir: join(root, 'none'), files });
+const withDiagnosticsOverlay = overlay => {
+  const base = loadFixture(join(fixtures, 'normal'), { asOf: AS_OF }).reader.diagnose().diagnostics;
+  return validateDiagnostics({ ...base, package_overlay: overlay });
+};
+
+test('overlay copy above the size limit is not read: all_nul_bytes is unknown, not false; a copy at the limit is read', () => {
+  if (process.platform !== 'win32') return;
+  const { root, pkg } = overlayRoot();
+  pkg('Big.Copy_0000000000001', { 'hardware-snapshot.json': Buffer.alloc(2 * 1024 * 1024) });
+  pkg('Edge.Copy_0000000000002', { 'hardware-snapshot.json': Buffer.alloc(1024 * 1024) });
+  pkg('Text.Copy_0000000000003', { 'hardware-snapshot.json': Buffer.concat([Buffer.alloc(2000), Buffer.from('x')]) });
+  const copies = Object.fromEntries(scanOf(root).copies.map(c => [c.package_family_name, c]));
+  assert.deepEqual([copies['Big.Copy_0000000000001'].size_bytes, copies['Big.Copy_0000000000001'].all_nul_bytes], [2 * 1024 * 1024, null]);
+  assert.deepEqual([copies['Edge.Copy_0000000000002'].size_bytes, copies['Edge.Copy_0000000000002'].all_nul_bytes], [1024 * 1024, true]);
+  assert.equal(copies['Text.Copy_0000000000003'].all_nul_bytes, false);
+});
+
+test('overlay scan: copies only of packages in packages_with_overlay (limit 64), check_failed kept, reparse points skipped', () => {
+  if (process.platform !== 'win32') return;
+  // (a) 66 packages with an overlay: the list stops at 64 and no copy belongs to a package outside it
+  const many = overlayRoot();
+  for (let i = 0; i < 66; i++) many.pkg(`Pkg.${String(i).padStart(2, '0')}_0000000000000`, { 'hardware-snapshot.json': Buffer.alloc(8) });
+  const m = scanOf(many.root);
+  assert.equal(m.packages_with_overlay.length, 64);
+  assert.equal(m.truncated, true);
+  assert.equal(m.copies.length, 64);
+  assert.ok(m.copies.every(c => m.packages_with_overlay.includes(c.package_family_name)), 'every copy belongs to a listed package');
+  assert.equal(m.check_failed, false);
+  withDiagnosticsOverlay(m);
+  // (b) a partial failure of the check next to a found overlay is not lost
+  const part = overlayRoot();
+  part.pkg('Good.Pkg_0000000000001', { 'hardware-snapshot.json': Buffer.alloc(8) });
+  const brokenDir = part.pkg('Broken.Pkg_0000000000002', { 'hardware-snapshot.json': Buffer.alloc(8) });
+  const original = fs.lstatSync;
+  fs.lstatSync = function (path, options) {
+    if (String(path).toLowerCase() === join(brokenDir, 'telemetry', 'hardware-snapshot.json').toLowerCase()) { const e = new Error('fault'); e.code = 'EPERM'; throw e; }
+    return original.call(this, path, options);
+  };
+  syncBuiltinESMExports();
+  let p;
+  try { p = scanOf(part.root); } finally { fs.lstatSync = original; syncBuiltinESMExports(); }
+  assert.deepEqual([p.status, p.check_failed, p.packages_with_overlay.length, p.copies.length], ['found', true, 2, 1]);
+  assert.equal(withDiagnosticsOverlay(p).package_overlay.check_failed, true);
+  // (c) a junction in place of the overlay directory is not followed
+  const link = overlayRoot();
+  const target = tempDir('overlay-target-');
+  mkdirSync(join(target, 'telemetry'), { recursive: true });
+  writeFileSync(join(target, 'telemetry', 'hardware-snapshot.json'), Buffer.alloc(8));
+  const linkParent = join(link.root, 'Packages', 'Linked.Pkg_0000000000001', 'LocalCache', 'Local');
+  mkdirSync(linkParent, { recursive: true });
+  symlinkSync(target, join(linkParent, 'DesktopWidgets'), 'junction');
+  const l = scanOf(link.root);
+  assert.deepEqual([l.status, l.packages_with_overlay.length, l.copies.length, l.check_failed], ['none_found', 0, 0, false]);
+});
+
+test('schemaIssuePaths: a pointer longer than 1024 characters is dropped, the others stay; the document stays valid', () => {
+  const issue = path => ({ message: `data${path} must be string` });
+  const atLimit = '/a'.repeat(512), tooLong = '/a'.repeat(513);
+  assert.deepEqual(schemaIssuePaths([issue(tooLong), issue('/ok'), issue(atLimit)]), ['/ok', atLimit]);
+  const base = loadFixture(join(fixtures, 'normal'), { asOf: AS_OF }).reader.diagnose().diagnostics;
+  const doc = structuredClone(base);
+  doc.sources.hardware_state = { ...doc.sources.hardware_state, read_status: 'invalid_input', detail: 'schema_validation_failed', stage: 'validate', schema_issue_paths: schemaIssuePaths([issue(tooLong), issue('/ok')]) };
+  assert.deepEqual(validateDiagnostics(doc).sources.hardware_state.schema_issue_paths, ['/ok']);
+});
+
+test('api_limits derive failure with a cached source is reported as api_limits_node_violates_schema; bridge-output unchanged', () => {
+  const dir = liveApiDir();
+  const reader = new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() });
+  assert.equal(reader.read().api_limits.read_status, 'ok');
+  putApi(dir, '{"broken":');
+  const plain = diagnoseChecked(reader);
+  assert.deepEqual([plain.d.sources.api_limits.detail, plain.d.sources.api_limits.cache_used], ['invalid_json', true], 'a plain read failure keeps its cause');
+  assert.deepEqual([plain.output.api_limits.status, plain.output.api_limits.read_status], ['error', 'invalid_input']);
+  for (const message of ['api_limits_node_violates_schema', 'conflicting_shared_pool_balance']) {
+    reader.apiNodeCheck = () => { throw new ContractError('invalid_input', message); };
+    const { output, d } = diagnoseChecked(reader);
+    const s = d.sources.api_limits;
+    assert.deepEqual([s.read_status, s.detail, s.stage, s.cache_used], ['invalid_input', message, 'derive', false], message);
+    assert.deepEqual(output.api_limits, plain.output.api_limits, 'bridge-output api_limits node is not changed by diagnostics');
+  }
+});
+
+test('non-ReadFailure exception in the security check is reported at stage security_check, not read', () => {
+  if (process.platform !== 'win32') return;
+  const dir = liveDir();
+  const reader = new TelemetryReader({ directory: dir, clock: AS_OF, env: noPackages() });
+  aclVerificationCache.get = () => { const e = new Error('fault'); e.code = 'EIO'; throw e; };
+  try {
+    const s = reader.diagnose().diagnostics.sources.hardware_state;
+    assert.deepEqual([s.read_status, s.detail, s.stage, s.errno], ['transient_io_error', 'io_error', 'security_check', 'EIO']);
+  } finally { delete aclVerificationCache.get; }
+});
+
+test('MCP get_read_diagnostics and CLI diagnose: schema-valid document; bridge-output tool unchanged', { timeout: 60000 }, async () => {
+  await withClient(['--fixture', join(fixtures, 'normal'), '--as-of', AS_OF], async client => {
+    const { tools } = await client.listTools();
+    const tool = tools.find(t => t.name === 'get_read_diagnostics');
+    assert.ok(tool);
+    assert.deepEqual(tool.outputSchema, diagnosticsSchema);
+    assert.equal(tool.inputSchema.additionalProperties, false);
+    assert.deepEqual(tools.find(t => t.name === 'get_telemetry_and_quotas').outputSchema, outputSchema);
+    const result = await client.callTool({ name: 'get_read_diagnostics', arguments: {} });
+    validateDiagnostics(result.structuredContent);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    assert.deepEqual([result.structuredContent.mode, result.structuredContent.sources.hardware_state.detail, result.structuredContent.sources.api_limits.detail], ['fixture', 'none', 'file_not_found']);
+    const facts = await client.callTool({ name: 'get_telemetry_and_quotas', arguments: {} });
+    assert.deepEqual(facts.structuredContent, JSON.parse(fixtureJson('normal', 'bridge-output.json')), 'bridge-output 1.0.0 unchanged');
+    assert.equal((await client.callTool({ name: 'get_read_diagnostics', arguments: { path: 'x' } })).isError, true);
+  });
+  const dir = liveDir({ hardware: '\u0000'.repeat(64), quotas: liveDoc('normal', 'quotas-snapshot.json') });
+  await withClient(['--telemetry-dir', dir, '--as-of', AS_OF], async client => {
+    const facts = (await client.callTool({ name: 'get_telemetry_and_quotas', arguments: {} })).structuredContent;
+    const diagnostics = (await client.callTool({ name: 'get_read_diagnostics', arguments: {} })).structuredContent;
+    validateDiagnostics(diagnostics);
+    assert.deepEqual([facts.hardware_state.read_status, diagnostics.sources.hardware_state.read_status, diagnostics.sources.hardware_state.detail], ['invalid_input', 'invalid_input', 'all_nul_bytes']);
+  });
+  const run = args => { try { return { code: 0, out: execFileSync(process.execPath, [join(here, 'cli.mjs'), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; } catch (e) { return { code: e.status, out: e.stdout }; } };
+  const base = ['--fixture', join(fixtures, 'normal'), '--as-of', AS_OF];
+  const cli = run(['diagnose', '--json', ...base]);
+  assert.equal(cli.code, 0);
+  validateDiagnostics(JSON.parse(cli.out));
+  const prebuilt = run(['diagnose', '--fixture', join(fixtures, 'offline', 'bridge-output.json')]);
+  assert.equal(prebuilt.code, 0);
+  const pd = validateDiagnostics(JSON.parse(prebuilt.out));
+  assert.ok(Object.values(pd.sources).every(s => s.detail === 'none' || s.detail === 'not_recorded'));
+  assert.equal(run([...base, 'diagnose']).code, 2, 'diagnose only as the first argument');
+  assert.equal(run(['facts', 'diagnose', ...base]).code, 2);
+  assert.throws(() => parseArgs(['diagnose'], { server: true }), e => e instanceof ConfigError);
+  assert.equal(run(['facts', ...base]).out, run(base).out, 'facts unchanged');
 });

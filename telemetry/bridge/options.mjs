@@ -1,14 +1,17 @@
 // Shared startup options for CLI and MCP server; resolved once, never from tool arguments.
 import { isAbsolute } from 'node:path';
 import { instant } from './core.mjs';
-import { ConfigError, TelemetryReader, loadFixture, resolveTelemetryDir } from './reader.mjs';
+import { ConfigError, TelemetryReader, loadFixture, resolveTelemetryDir, FILES } from './reader.mjs';
+import { diagnosticsOfOutput } from './diagnostics.mjs';
 
-// `facts` (first CLI argument only) is a synonym of the bare CLI call; `--json` is accepted as a no-op (the output is always JSON).
+// `facts` (first CLI argument only) is a synonym of the bare CLI call; `diagnose` (first CLI argument only) prints the
+// read diagnostics document instead; `--json` is accepted as a no-op (the output is always JSON).
 export function parseArgs(argv, { server = false, cli = false } = {}) {
-  const options = { telemetryDir: null, fixture: null, asOf: null, diagnostics: false, exitReceiptDir: null };
+  const options = { command: null, telemetryDir: null, fixture: null, asOf: null, diagnostics: false, exitReceiptDir: null };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i], next = argv[i + 1];
     if (cli && i === 0 && flag === 'facts') continue;
+    if (cli && i === 0 && flag === 'diagnose') { options.command = 'diagnose'; continue; }
     if (cli && flag === '--json') continue;
     if (flag === '--telemetry-dir' && next !== undefined) options.telemetryDir = argv[++i];
     else if (flag === '--fixture' && next !== undefined) options.fixture = argv[++i];
@@ -22,15 +25,16 @@ export function parseArgs(argv, { server = false, cli = false } = {}) {
   return options;
 }
 
-// Returns a function producing one validated bridge-output per call (same core for CLI and MCP).
+// Returns functions producing one validated bridge-output per call (same core for CLI and MCP) and one read
+// diagnostics document (read-diagnostics 1.0.0) per call.
 export function createSource(options, env = process.env) {
   if (options.fixture) {
     const fixture = loadFixture(options.fixture, { asOf: options.asOf, env });
-    if (fixture.kind === 'output') return { mode: 'fixture', read: () => fixture.output, reader: null };
-    return { mode: 'fixture', read: () => fixture.reader.read(), reader: fixture.reader };
+    if (fixture.kind === 'output') return { mode: 'fixture', read: () => fixture.output, diagnose: () => diagnosticsOfOutput(fixture.output, FILES), reader: null };
+    return { mode: 'fixture', read: () => fixture.reader.read(), diagnose: () => fixture.reader.diagnose().diagnostics, reader: fixture.reader };
   }
   const reader = new TelemetryReader({ directory: resolveTelemetryDir(options.telemetryDir, env), mode: 'live', env, clock: options.asOf });
-  return { mode: 'live', read: () => reader.read(), reader };
+  return { mode: 'live', read: () => reader.read(), diagnose: () => reader.diagnose().diagnostics, reader };
 }
 
 const startedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
