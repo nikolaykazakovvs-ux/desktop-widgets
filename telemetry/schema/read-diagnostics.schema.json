@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.desktop-widgets.invalid/telemetry/read-diagnostics/1.0.0/read-diagnostics.schema.json",
+  "title": "read-diagnostics.schema.json",
+  "description": "Exact cause of each snapshot read by the Widgets Bridge and copies of snapshots in MSIX package overlays. Separate document: bridge-output 1.0.0 is not changed. Never carries file contents, values or full paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "kind": { "const": "widgets-bridge-read-diagnostics" },
+    "bridge_output_schemaVersion": { "const": "1.0.0" },
+    "mode": { "enum": ["fixture", "live"] },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hardware_state": { "$ref": "#/$defs/source" },
+        "subscription_quotas": { "$ref": "#/$defs/source" },
+        "api_limits": { "$ref": "#/$defs/source" }
+      },
+      "required": ["hardware_state", "subscription_quotas", "api_limits"]
+    },
+    "package_overlay": { "$ref": "#/$defs/package_overlay" }
+  },
+  "required": ["schemaVersion", "kind", "bridge_output_schemaVersion", "mode", "generated_at", "sources", "package_overlay"],
+  "$defs": {
+    "file": { "enum": ["hardware-snapshot.json", "quotas-snapshot.json", "api-balances-snapshot.json"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "file": { "$ref": "#/$defs/file" },
+        "read_status": {
+          "enum": ["ok", "missing", "invalid_input", "clock_invalid", "transient_io_error", "access_denied"]
+        },
+        "detail": {
+          "enum": [
+            "none",
+            "not_recorded",
+            "file_not_found",
+            "path_not_directory",
+            "os_access_denied",
+            "permission_error_after_retries",
+            "reparse_point",
+            "directory_identity_changed",
+            "not_regular_file",
+            "untrusted_owner",
+            "untrusted_allow_ace",
+            "null_dacl",
+            "unknown_ace_type",
+            "missing_owner",
+            "missing_dacl",
+            "missing_sddl",
+            "security_query_failed",
+            "sharing_retries_exhausted",
+            "io_error",
+            "unexpected_exception",
+            "empty_file",
+            "file_too_large",
+            "all_nul_bytes",
+            "invalid_utf8",
+            "invalid_json",
+            "duplicate_json_member",
+            "unsafe_integer",
+            "float_for_integer_metric",
+            "invalid_timestamp",
+            "schema_validation_failed",
+            "semantic_rule_failed",
+            "mode_mismatch",
+            "future_timestamp",
+            "secret_or_pii_detected",
+            "conflicting_shared_pool_balance",
+            "api_limits_node_violates_schema",
+            "validation_exception"
+          ]
+        },
+        "stage": {
+          "enum": ["none", "directory_check", "security_check", "open", "read", "decode", "parse", "validate", "derive"]
+        },
+        "errno": {
+          "anyOf": [{ "type": "string", "pattern": "^E[A-Z0-9]{1,24}$" }, { "type": "null" }]
+        },
+        "size_bytes": {
+          "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
+        },
+        "json_offset": {
+          "description": "Character offset in the decoded text where strict JSON parsing stopped.",
+          "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
+        },
+        "rule": {
+          "description": "Fixed name of the failed contract rule from the Bridge code; never an input value.",
+          "anyOf": [{ "type": "string", "pattern": "^[A-Za-z0-9 _/:.-]{1,120}$" }, { "type": "null" }]
+        },
+        "schema_issue_paths": {
+          "description": "JSON pointers of the first schema violations; object keys outside [A-Za-z0-9_] are replaced by *.",
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^(?:/(?:[A-Za-z0-9_]{1,64}|\\*))*$", "maxLength": 1024 }
+        },
+        "cache_used": {
+          "description": "The last verified snapshot of an earlier read was served instead of this read.",
+          "type": "boolean"
+        }
+      },
+      "required": ["file", "read_status", "detail", "stage", "errno", "size_bytes", "json_offset", "rule", "schema_issue_paths", "cache_used"]
+    },
+    "package_overlay": {
+      "description": "Copies of telemetry snapshots under %LOCALAPPDATA%\\Packages\\<package>\\LocalCache\\Local\\DesktopWidgets. A packaged client (MSIX) and the Bridge processes it starts read such a copy instead of the real file.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["not_applicable", "none_found", "found", "check_failed"] },
+        "scanned_packages": {
+          "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
+        },
+        "packages_with_overlay": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/package_family_name" }
+        },
+        "copies": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "package_family_name": { "$ref": "#/$defs/package_family_name" },
+              "file": { "$ref": "#/$defs/file" },
+              "size_bytes": { "type": "integer", "minimum": 0 },
+              "all_nul_bytes": { "anyOf": [{ "type": "boolean" }, { "type": "null" }] },
+              "served_to_this_process": {
+                "description": "The file this Bridge process reads under its telemetry directory is this copy (same file identity).",
+                "anyOf": [{ "type": "boolean" }, { "type": "null" }]
+              }
+            },
+            "required": ["package_family_name", "file", "size_bytes", "all_nul_bytes", "served_to_this_process"]
+          }
+        },
+        "truncated": { "type": "boolean" },
+        "check_failed": {
+          "description": "Some directory or file of the scan could not be checked (a technical failure), so the lists may be incomplete even when status is found.",
+          "type": "boolean"
+        }
+      },
+      "required": ["status", "scanned_packages", "packages_with_overlay", "copies", "truncated", "check_failed"]
+    },
+    "package_family_name": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" }
+  }
+}

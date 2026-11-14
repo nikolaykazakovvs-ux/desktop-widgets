@@ -31,8 +31,9 @@ class ContractTests(unittest.TestCase):
 
     def test_all_schemas_have_supported_dialect_and_validate(self):
         self.assertEqual(set(SCHEMAS), {"common.schema.json", "hardware-snapshot.schema.json", "quotas-snapshot.schema.json",
-                                        "bridge-output.schema.json", "api-limits-v1.1.schema.json"})
-        self.assertEqual(len(SCHEMAS), 5)
+                                        "bridge-output.schema.json", "api-limits-v1.1.schema.json",
+                                        "read-diagnostics.schema.json"})
+        self.assertEqual(len(SCHEMAS), 6)
         for schema in SCHEMAS.values():
             Draft202012Validator.check_schema(schema)
             self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")

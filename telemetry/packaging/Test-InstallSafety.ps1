@@ -63,6 +63,7 @@ try {
     Check 'discovery_contract_versions' ($disc.telemetry_contract.schemaVersion -eq '1.0.0' -and $disc.telemetry_contract.policy_version -eq '0.1.0' -and $disc.telemetry_contract.api_limits_extension -eq 'api-limits/1.1.0') ($disc.telemetry_contract | ConvertTo-Json -Compress)
     Check 'discovery_api_extension_is_in_extension_schema' ((Get-Content -LiteralPath (Join-Path $versionDir 'schema\extensions\api-limits-v1.1.schema.json') -Raw).Contains([string]$disc.telemetry_contract.api_limits_extension)) ''
     Check 'discovery_capabilities_detected_for_current_sources' ($disc.capabilities.facts -eq $true -and $disc.capabilities.api_limits -eq $true -and $disc.commands.facts -like '*widgets-bridge.cmd" facts --json' -and $disc.commands.cli -like '*widgets-bridge.cmd"') ($disc.capabilities | ConvertTo-Json -Compress)
+    Check 'discovery_read_diagnostics_for_current_sources' ($disc.capabilities.read_diagnostics -eq $true -and $disc.commands.diagnose -like '*widgets-bridge.cmd" diagnose --json' -and (@($disc.commands.mcp.tools) -join ',') -eq 'get_telemetry_and_quotas,get_read_diagnostics') "$($disc.commands.diagnose) tools=$(@($disc.commands.mcp.tools) -join ',')"
     Check 'discovery_launchers_exist' ((Test-Path -LiteralPath $disc.launchers.cli) -and (Test-Path -LiteralPath $disc.launchers.mcp_server) -and $disc.launchers.cli -eq (Join-Path $root 'widgets-bridge.cmd') -and $disc.launchers.mcp_server -eq (Join-Path $root 'widgets-bridge-server.cmd')) ''
     Check 'discovery_commands' ($disc.commands.facts -like '*widgets-bridge.cmd" facts --json' -and $disc.commands.mcp.server_name -eq 'widgets-bridge' -and $disc.commands.mcp.command -eq $disc.launchers.mcp_server) "$($disc.commands.facts)"
     $dataKeys = @($disc.data | ForEach-Object { $_.key })
@@ -230,6 +231,13 @@ try {
     Write-Discovery $synRoot $synId
     $ds = Get-Content -LiteralPath (Join-Path $synRoot 'discovery.json') -Raw | ConvertFrom-Json
     Check 'synthetic_full_version_has_facts_and_api_limits' ($ds.capabilities.facts -eq $true -and $ds.capabilities.api_limits -eq $true -and $ds.commands.facts -like '*widgets-bridge.cmd" facts --json' -and (@($ds.data | ForEach-Object { $_.key }) -join ',') -eq 'subscription_quotas,hardware_state,api_limits') ($ds.capabilities | ConvertTo-Json -Compress)
+    Check 'synthetic_version_without_diagnostics_promises_none' ($ds.capabilities.read_diagnostics -eq $false -and -not $ds.commands.PSObject.Properties['diagnose'] -and (@($ds.commands.mcp.tools) -join ',') -eq 'get_telemetry_and_quotas') ($ds.capabilities | ConvertTo-Json -Compress)
+    [IO.File]::WriteAllText((Join-Path $synDir 'bridge\diagnostics.mjs'), "export const x = 1;`n", $enc)
+    Copy-Item -LiteralPath (Join-Path $SourceRoot 'telemetry\schema\read-diagnostics.schema.json') -Destination (Join-Path $synDir 'schema')
+    [IO.File]::WriteAllText((Join-Path $synDir 'bridge\options.mjs'), "if (cli && i === 0 && flag === 'facts') continue;`nif (cli && i === 0 && flag === 'diagnose') { options.command = 'diagnose'; continue; }`n", $enc)
+    Write-Discovery $synRoot $synId
+    $ds = Get-Content -LiteralPath (Join-Path $synRoot 'discovery.json') -Raw | ConvertFrom-Json
+    Check 'synthetic_version_with_diagnostics_lists_command_and_tool' ($ds.capabilities.read_diagnostics -eq $true -and $ds.commands.diagnose -like '*widgets-bridge.cmd" diagnose --json' -and (@($ds.commands.mcp.tools) -join ',') -eq 'get_telemetry_and_quotas,get_read_diagnostics') ($ds.capabilities | ConvertTo-Json -Compress)
 
     # 10. Uninstall with a failed unregistration is partial: the rest is removed, exit code 1 and partial=true (review F2)
     $partRoot = Join-Path $WorkRoot 'root-partial'

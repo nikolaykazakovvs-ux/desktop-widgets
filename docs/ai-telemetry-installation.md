@@ -46,7 +46,7 @@ pwsh telemetry\packaging\Install-Bridge.ps1 -SourceRoot <repo> [-InstallRoot <ab
 - **Claude Code**: `telemetry\clients\claude-code\register-claude.ps1 -ClaudeConfigDir <abs>` выполняет `claude mcp add-json --scope user widgets-bridge '<json>'` с `CLAUDE_CONFIG_DIR` только для дочернего процесса; `-PrintOnly` печатает команду. Шаблон: `mcp.json.example`.
 - **Antigravity**: CLI `agy.exe mcp add [flags] <name> <commandOrUrl> [args...]` (флаги до имени); для моста — `agy.exe mcp add widgets-bridge "<InstallRoot>\widgets-bridge-server.cmd"`. Отдельный помощник не нужен: `Register-Clients.ps1` правит тот же файл, который показывает `agy.exe mcp list`.
 
-Инструмент MCP: `get_telemetry_and_quotas`.
+Инструменты MCP: `get_telemetry_and_quotas`; с версии, где есть `bridge\diagnostics.mjs`, также `get_read_diagnostics` — точная причина каждого `read_status`, отличного от `ok`, и копии снимков в слоях MSIX-пакетов (см. «Диагностика чтения» в [контракте](ai-telemetry-contract.md)).
 
 ## Автоподключение агентов
 
@@ -61,9 +61,9 @@ pwsh telemetry\packaging\Install-Bridge.ps1 -SourceRoot <repo> [-InstallRoot <ab
 | `kind`, `name` | `widgets-bridge-discovery`, `widgets-bridge` |
 | `bridge` | `version_id` (id из `current.json`), `package_version`, `installed_at`, `install_root` |
 | `telemetry_contract` | `schemaVersion`, `policy_version` ответа и `api_limits_extension`, взятые из установленной версии |
-| `capabilities` | `facts`, `api_limits` — что умеет **установленная** версия (определяется по её собственным файлам: подкоманда `facts` в `bridge\options.mjs`, расширение в `core.mjs` и чтение `api-balances-snapshot.json` в `reader.mjs`), а не текущие исходники |
+| `capabilities` | `facts`, `api_limits`, `read_diagnostics` — что умеет **установленная** версия (определяется по её собственным файлам: подкоманда `facts` в `bridge\options.mjs`, расширение в `core.mjs` и чтение `api-balances-snapshot.json` в `reader.mjs`, `bridge\diagnostics.mjs` со схемой `schema\read-diagnostics.schema.json` и подкомандой `diagnose`), а не текущие исходники |
 | `launchers` | абсолютные пути `cli` (`widgets-bridge.cmd`) и `mcp_server` (`widgets-bridge-server.cmd`) |
-| `commands` | `facts` — строка вызова `facts --json`, **только если установленная версия её поддерживает**; `cli` — вызов без подкоманды (есть всегда, тот же выход); `mcp` — `server_name`, `transport`, `command`, `args`, `tools` |
+| `commands` | `facts` — строка вызова `facts --json`, **только если установленная версия её поддерживает**; `diagnose` — строка вызова `diagnose --json` (документ `read-diagnostics` 1.0.0), только если установленная версия её поддерживает (`capabilities.read_diagnostics`); `cli` — вызов без подкоманды (есть всегда, тот же выход); `mcp` — `server_name`, `transport`, `command`, `args`, `tools` (`get_read_diagnostics` — только вместе с `capabilities.read_diagnostics`) |
 | `telemetry_dir`, `data` | каталог снимков `%LOCALAPPDATA%\DesktopWidgets\telemetry` и перечень данных: `subscription_quotas` (`quotas-snapshot.json`), `hardware_state` (`hardware-snapshot.json`), `api_limits` (`api-balances-snapshot.json`, расширение контракта, `optional: true`; записывается, только если установленная версия умеет это расширение) |
 
 Секретов в файле нет. Приватность: пути абсолютные и содержат каталог профиля пользователя (в том числе имя пользователя) — это неизбежно для запуска; файл лежит только в каталоге установки на этой машине и в репозиторий не попадает. Свежесть и статусы в файле не хранятся: их возвращает только `facts` (или MCP-инструмент), проверив снимки по контракту. `Test-BridgeHealth.ps1` проверяет файл (тип, версия совпадает с `current.json`, лаунчеры существуют, `capabilities` согласованы с `commands`) и вызывает CLI так, как записано в файле. Агенту: если `commands.facts` нет, версия не знает подкоманду `facts` — используйте `commands.cli` (тот же выход).

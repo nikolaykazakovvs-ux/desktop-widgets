@@ -134,7 +134,12 @@ function Get-BridgeCapabilities([string]$VersionDir, $Contract) {
     $api = $false
     $reader = Join-Path $VersionDir 'bridge\reader.mjs'
     if ($Contract.api_limits_extension -and (Test-Path -LiteralPath $reader)) { $api = [bool](Select-String -LiteralPath $reader -SimpleMatch 'api-balances-snapshot.json' -Quiet) }
-    return [ordered]@{ facts = $facts; api_limits = $api }
+    # Диагностика чтения (read-diagnostics 1.0.0): модуль diagnostics.mjs, его схема и подкоманда diagnose в options.mjs.
+    $diag = $false
+    if ((Test-Path -LiteralPath (Join-Path $VersionDir 'bridge\diagnostics.mjs')) -and (Test-Path -LiteralPath (Join-Path $VersionDir 'schema\read-diagnostics.schema.json')) -and (Test-Path -LiteralPath $opt)) {
+        $diag = [bool](Select-String -LiteralPath $opt -Pattern "^[^/]*['""]diagnose['""]" -Quiet)
+    }
+    return [ordered]@{ facts = $facts; api_limits = $api; read_diagnostics = $diag }
 }
 
 # discovery.json: точка обнаружения Моста виджетов для агентов (атомарная запись, без секретов).
@@ -153,8 +158,11 @@ function Write-Discovery([string]$Root, [string]$VersionId) {
     $cap = Get-BridgeCapabilities $vdir $contract
     $commands = [ordered]@{}
     if ($cap.facts) { $commands.facts = "`"$cli`" facts --json" }
+    if ($cap.read_diagnostics) { $commands.diagnose = "`"$cli`" diagnose --json" }
     $commands.cli = "`"$cli`""
-    $commands.mcp = [ordered]@{ server_name = 'widgets-bridge'; transport = 'stdio'; command = $srv; args = @(); tools = @('get_telemetry_and_quotas') }
+    $tools = @('get_telemetry_and_quotas')
+    if ($cap.read_diagnostics) { $tools += 'get_read_diagnostics' }
+    $commands.mcp = [ordered]@{ server_name = 'widgets-bridge'; transport = 'stdio'; command = $srv; args = @(); tools = $tools }
     $data = @(
         [ordered]@{ key = 'subscription_quotas'; snapshot = (& $snap 'quotas-snapshot.json'); optional = $false }
         [ordered]@{ key = 'hardware_state'; snapshot = (& $snap 'hardware-snapshot.json'); optional = $false }
